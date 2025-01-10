@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -63,18 +64,19 @@ func (p *RESPParser) ParseToken(buf []byte) ([]string, bool, error) {
 		return p.parsedArgs, true, nil
 	}
 
-	return p.parsedArgs, false, ErrUnexpectedStateOfParser
+	return p.parsedArgs, false, nil
 }
 
 func handleConnection(c net.Conn) {
 	defer c.Close()
 
 	reader := bufio.NewReader(c)
+	parser := RESPParser{}
 
 	for {
 		buf, err := reader.ReadBytes('\n')
 		if err != nil {
-			if err.Error() == "EOF" {
+			if err == io.EOF {
 				continue
 			}
 			log.Println("Error reading:", err.Error())
@@ -83,12 +85,33 @@ func handleConnection(c net.Conn) {
 
 		log.Println("Received:", string(buf))
 
-		if string(buf) == "PING\r\n" {
-			log.Println("Responding with PONG")
-			_, writeErr := c.Write([]byte("+PONG\r\n"))
-			if writeErr != nil {
-				log.Println("Error writing:", writeErr.Error())
-				break
+		args, ready, err := parser.ParseToken(buf)
+		if err != nil {
+			log.Println("Error parsing:", err.Error())
+			break
+		}
+		if ready {
+			log.Println("Command ready:", args)
+
+			// TODO: Implement the actual command handling. Probably need another state machine here.
+			switch args[0] {
+			case "PING":
+				log.Println("Responding with PONG")
+				_, writeErr := c.Write([]byte("+PONG\r\n"))
+				if writeErr != nil {
+					log.Println("Error writing:", writeErr.Error())
+					break
+				}
+			case "ECHO":
+				log.Println("Responding with ECHO")
+				// TODO: Add a function for constructing RESP strings
+				_, writeErr := c.Write([]byte("$" + strconv.Itoa(len(args[1])) + "\r\n" + args[1] + "\r\n"))
+				if writeErr != nil {
+					log.Println("Error writing:", writeErr.Error())
+					break
+				}
+			default:
+				log.Println("Unknown command:", args[0])
 			}
 		}
 	}
