@@ -2,26 +2,39 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"strconv"
 )
+
+var ErrInvalidCommand = errors.New("invalid command")
 
 // Redis is a simple Redis server implementation.
 type Redis struct {
 	storage Storage
 }
 
-// Set sets the value of a key in the Redis server.
-func (r *Redis) Set(key, value string) error {
-	return r.storage.Set(key, value)
-}
+// HandleSetCommand handles the SET command including the optional TTL argument.
+func (r *Redis) HandleSetCommand(args []string) error {
+	if len(args) == 3 {
+		return r.storage.Set(args[1], args[2])
+	}
 
-// Get retrieves the value of a key from the Redis server.
-func (r *Redis) Get(key string) (string, error) {
-	return r.storage.Get(key)
+	if len(args) == 5 {
+		log.Println("Setting with TTL")
+		ttl, err := strconv.Atoi(args[4])
+		if err != nil {
+			return err
+		}
+
+		return r.storage.SetWithTTL(args[1], args[2], int64(ttl))
+	}
+
+	return ErrInvalidCommand
 }
 
 // Write writes a buffer to a connection.
@@ -73,7 +86,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 					break
 				}
 			case "SET":
-				err := r.Set(args[1], args[2])
+				err := r.HandleSetCommand(args)
 				if err != nil {
 					log.Println("Error setting value:", err.Error())
 				}
@@ -81,13 +94,10 @@ func (r *Redis) handleConnection(c net.Conn) {
 					break
 				}
 			case "GET":
-				v, err := r.Get(args[1])
-				var resp string
-				if err != nil {
+				resp, err := r.storage.Get(args[1])
+				if err != nil && err != ErrKeyNotFound {
 					log.Println("Error getting value:", err.Error())
-					resp = ""
-				} else {
-					resp = v
+					break
 				}
 				if err := r.Write(c, EncodeRESPBulkString(resp)); err != nil {
 					break
