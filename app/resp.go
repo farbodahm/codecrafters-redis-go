@@ -86,3 +86,15 @@ func EncodeRESPBulkString(s string) []byte {
 
 	return []byte("$" + strconv.Itoa(len(s)) + RESPDelimiter + s + RESPDelimiter)
 }
+
+// EncodeRESPArray encodes an array into the RESP format.
+func EncodeRESPArray(args []string) []byte {
+	var buf bytes.Buffer
+
+	buf.WriteString("*" + strconv.Itoa(len(args)) + RESPDelimiter)
+	for _, arg := range args {
+		buf.Write(EncodeRESPBulkString(arg))
+	}
+
+	return buf.Bytes()
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -12,10 +13,18 @@ import (
 )
 
 var ErrInvalidCommand = errors.New("invalid command")
+var ErrInvalidConfigParameter = errors.New("invalid config parameter")
 
 // Redis is a simple Redis server implementation.
 type Redis struct {
 	storage Storage
+	config  Config
+}
+
+// Config holds the configuration for the Redis server.
+type Config struct {
+	Dir        string
+	DBFileName string
 }
 
 // HandleSetCommand handles the SET command including the optional TTL argument.
@@ -35,6 +44,25 @@ func (r *Redis) HandleSetCommand(args []string) error {
 	}
 
 	return ErrInvalidCommand
+}
+
+// HandleConfigCommand handles the CONFIG command.
+func (r *Redis) HandleConfigCommand(args []string) ([]byte, error) {
+	if len(args) == 3 {
+		switch args[1] {
+		case "GET":
+			switch args[2] {
+			case "dir":
+				return EncodeRESPArray([]string{"dir", r.config.Dir}), nil
+			case "dbfilename":
+				return EncodeRESPArray([]string{"dbfilename", r.config.DBFileName}), nil
+			default:
+				return EncodeRESPBulkString(""), ErrInvalidConfigParameter
+			}
+		}
+	}
+
+	return EncodeRESPBulkString(""), ErrInvalidCommand
 }
 
 // Write writes a buffer to a connection.
@@ -102,6 +130,16 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err := r.Write(c, EncodeRESPBulkString(resp)); err != nil {
 					break
 				}
+
+			case "CONFIG":
+				resp, err := r.HandleConfigCommand(args)
+				if err != nil {
+					log.Println("Error handling CONFIG command:", err.Error())
+				}
+				if err := r.Write(c, resp); err != nil {
+					break
+				}
+
 			default:
 				log.Println("Unknown command:", args[0])
 			}
@@ -133,6 +171,18 @@ func (r *Redis) Start() {
 
 func main() {
 	log.Println("Starting Application...")
-	r := Redis{storage: NewInMemoryStorage()}
+
+	rdb_dir := flag.String("dir", "/tmp/redis-files", "the path to the directory where the RDB file is stored")
+	rdb_file := flag.String("dbfilename", "dump.rdb", "the name of the RDB file")
+	flag.Parse()
+
+	config := Config{
+		Dir:        *rdb_dir,
+		DBFileName: *rdb_file,
+	}
+
+	log.Println("Using config:", config)
+
+	r := Redis{storage: NewInMemoryStorage(), config: config}
 	r.Start()
 }
