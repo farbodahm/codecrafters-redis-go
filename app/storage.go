@@ -15,6 +15,7 @@ type Storage interface {
 	Get(key string) (string, error)
 	Set(key, value string) error
 	SetWithTTL(key, value string, ttl int64) error
+	Keys() ([]string, error)
 }
 
 // InMemoryStorage is an in-memory implementation of the Storage interface.
@@ -73,4 +74,17 @@ func (s *InMemoryStorage) SetWithTTL(key, value string, ttl int64) error {
 
 	s.data[key] = InMemoryStorageValue{Value: value, TTLMs: ttl, StoredAt: time.Now()}
 	return nil
+}
+
+// Keys returns a list of all keys in the in-memory storage.
+func (s *InMemoryStorage) Keys() ([]string, error) {
+	s.RLock()
+	defer s.RUnlock()
+
+	keys := make([]string, 0, len(s.data))
+	for k := range s.data {
+		keys = append(keys, k)
+	}
+
+	return keys, nil
 }

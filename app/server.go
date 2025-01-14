@@ -74,6 +74,20 @@ func (r *Redis) Write(c net.Conn, buf []byte) error {
 	return err
 }
 
+// HandleKeysCommand handles the KEYS command.
+func (r *Redis) HandleKeysCommand(args []string) ([]byte, error) {
+	if len(args) != 2 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	keys, err := r.storage.Keys()
+	if err != nil {
+		return EncodeRESPBulkString(""), err
+	}
+
+	return EncodeRESPArray(keys), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -139,7 +153,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err := r.Write(c, resp); err != nil {
 					break
 				}
-
+			case "KEYS":
+				resp, err := r.HandleKeysCommand(args)
+				if err != nil {
+					log.Println("Error handling KEYS command:", err.Error())
+				}
+				if err := r.Write(c, resp); err != nil {
+					break
+				}
 			default:
 				log.Println("Unknown command:", args[0])
 			}
@@ -183,6 +204,20 @@ func main() {
 
 	log.Println("Using config:", config)
 
-	r := Redis{storage: NewInMemoryStorage(), config: config}
+	var r Redis
+	rdb_path := *rdb_dir + "/" + *rdb_file
+	if _, err := os.Stat(rdb_path); errors.Is(err, os.ErrNotExist) {
+		log.Println("RDB file does not exist")
+		r = Redis{storage: NewInMemoryStorage(), config: config}
+	} else {
+		log.Println("RDB file exists")
+		rdb_parser := NewRDBParser(NewInMemoryStorage())
+		err := rdb_parser.Parse(rdb_path)
+		if err != nil {
+			log.Fatal(err)
+		}
+		r = Redis{storage: rdb_parser.Data, config: config}
+	}
+
 	r.Start()
 }
