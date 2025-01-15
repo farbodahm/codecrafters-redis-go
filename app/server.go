@@ -19,6 +19,7 @@ var ErrInvalidConfigParameter = errors.New("invalid config parameter")
 type Redis struct {
 	storage Storage
 	config  Config
+	rconfig ReplicationConfig
 }
 
 // Config holds the configuration for the Redis server.
@@ -27,6 +28,16 @@ type Config struct {
 	Port       int
 	Dir        string
 	DBFileName string
+}
+
+func NewRedis(config Config, storage Storage) *Redis {
+	return &Redis{
+		storage: storage,
+		config:  config,
+		rconfig: ReplicationConfig{
+			Role: "master",
+		},
+	}
 }
 
 // HandleSetCommand handles the SET command including the optional TTL argument.
@@ -65,6 +76,15 @@ func (r *Redis) HandleConfigCommand(args []string) ([]byte, error) {
 	}
 
 	return EncodeRESPBulkString(""), ErrInvalidCommand
+}
+
+// HandleInfoCommand handles info command. Currently it only handles replication related info.
+func (r *Redis) HandleInfoCommand(args []string) ([]byte, error) {
+	if len(args) != 2 || args[1] != "replication" {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	return EncodeRESPBulkString(fmt.Sprintf("role:%s", r.rconfig.Role)), nil
 }
 
 // Write writes a buffer to a connection.
@@ -163,6 +183,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err := r.Write(c, resp); err != nil {
 					break
 				}
+			case "INFO":
+				resp, err := r.HandleInfoCommand(args)
+				if err != nil {
+					log.Println("Error handling INFO command:", err.Error())
+				}
+				if err := r.Write(c, resp); err != nil {
+					break
+				}
 			default:
 				log.Println("Unknown command:", args[0])
 			}
@@ -214,7 +242,7 @@ func main() {
 	rdb_path := *rdb_dir + "/" + *rdb_file
 	if _, err := os.Stat(rdb_path); errors.Is(err, os.ErrNotExist) {
 		log.Println("RDB file does not exist")
-		r = Redis{storage: NewInMemoryStorage(), config: config}
+		r = *NewRedis(config, NewInMemoryStorage())
 	} else {
 		log.Println("RDB file exists")
 		rdb_parser := NewRDBParser(NewInMemoryStorage())
@@ -222,7 +250,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		r = Redis{storage: rdb_parser.Data, config: config}
+		r = *NewRedis(config, rdb_parser.Data)
 	}
 
 	r.Start()
