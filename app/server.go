@@ -23,6 +23,8 @@ type Redis struct {
 
 // Config holds the configuration for the Redis server.
 type Config struct {
+	Address    string
+	Port       int
 	Dir        string
 	DBFileName string
 }
@@ -170,11 +172,11 @@ func (r *Redis) handleConnection(c net.Conn) {
 
 // Start starts the Redis server.
 func (r *Redis) Start() {
-	log.Println("Starting server on port 6379")
+	log.Printf("Starting server on port %d\n", r.config.Port)
 
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
+	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", r.config.Address, r.config.Port))
 	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
+		fmt.Printf("Failed to bind to port %d\n", r.config.Port)
 		os.Exit(1)
 	}
 
@@ -193,11 +195,15 @@ func (r *Redis) Start() {
 func main() {
 	log.Println("Starting Application...")
 
+	redis_port := flag.Int("port", 6379, "the port to listen on")
+	redis_addr := flag.String("addr", "0.0.0.0", "the address to bind to")
 	rdb_dir := flag.String("dir", "/tmp/redis-files", "the path to the directory where the RDB file is stored")
 	rdb_file := flag.String("dbfilename", "dump.rdb", "the name of the RDB file")
 	flag.Parse()
 
 	config := Config{
+		Address:    *redis_addr,
+		Port:       *redis_port,
 		Dir:        *rdb_dir,
 		DBFileName: *rdb_file,
 	}
