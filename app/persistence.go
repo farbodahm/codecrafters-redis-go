@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 )
 
 var ErrInvalidHeader = errors.New("invalid RDB header")
@@ -18,7 +19,8 @@ const (
 	RDB_DB_START   = 0xFE // Database selector
 	RDB_DB_SIZE    = 0xFB // Hash table sizes
 	RDB_STRING     = 0x00
-	RDB_EXPIRES_AT = 0xFC // Expire time MS
+	RDB_EXPIRES_MS = 0xFC // Expire time MS
+	RDB_EXPIRES_S  = 0xFD // Expire time S
 	RDB_EOF        = 0xFF // End of file
 	RDB_MODULE_AUX = 0xF7 // Module auxiliary data
 )
@@ -123,6 +125,11 @@ func (p *RDBParser) parseDatabase(r *bufio.Reader) error {
 			if err := p.addKeyValue(r); err != nil {
 				return err
 			}
+		case RDB_EXPIRES_MS, RDB_EXPIRES_S:
+			log.Println("Adding new key-value pair with expire")
+			if err := p.addKeyValueWithTTL(b, r); err != nil {
+				return err
+			}
 		case RDB_MODULE_AUX:
 			// Skip the module auxiliary data
 			log.Println("Skipping module auxiliary data")
@@ -159,6 +166,65 @@ func (p *RDBParser) addKeyValue(r *bufio.Reader) error {
 	return nil
 }
 
+// addKeyValueWithTTL adds a key-value and expects the underlying buffer points to a expire time.
+func (p *RDBParser) addKeyValueWithTTL(kv_type byte, r *bufio.Reader) error {
+	var expireIn time.Duration
+	switch kv_type {
+	case RDB_EXPIRES_MS:
+		bytes := make([]byte, 8)
+		_, err := r.Read(bytes)
+		if err != nil {
+			return fmt.Errorf("error reading expire time MS: %w", err)
+		}
+		expireAt := time.UnixMilli(int64(binary.LittleEndian.Uint64(bytes)))
+		expireIn = time.Until(expireAt)
+
+	case RDB_EXPIRES_S:
+		bytes := make([]byte, 4)
+		_, err := r.Read(bytes)
+		if err != nil {
+			return fmt.Errorf("error reading expire time S: %w", err)
+		}
+		expireAt := time.Unix(int64(binary.LittleEndian.Uint32(bytes)), 0)
+		expireIn = time.Until(expireAt)
+	default:
+		return fmt.Errorf("unknown expire time type: 0x%02X", kv_type)
+	}
+
+	// Verify value type
+	b, err := r.ReadByte()
+	if err != nil {
+		return fmt.Errorf("error reading value type: %w", err)
+	}
+	if b != RDB_STRING {
+		return fmt.Errorf("expected string value type, got 0x%02X", b)
+	}
+
+	// Read the key
+	key, err := p.readNextString(r)
+	if err != nil {
+		return fmt.Errorf("error reading db key: %w", err)
+	}
+
+	// Read the value
+	value, err := p.readNextString(r)
+	if err != nil {
+		return fmt.Errorf("error reading db value: %w", err)
+	}
+
+	if expireIn < 0 {
+		log.Println("Key ", key, " expired")
+		return nil
+	}
+
+	err = p.Data.SetWithTTL(key, value, expireIn.Milliseconds())
+	if err != nil {
+		return fmt.Errorf("error setting key-value pair: %w", err)
+	}
+
+	return nil
+}
+
 // parseHeader parses the header of the RDB file.
 func (p *RDBParser) parseHeader(r *bufio.Reader) error {
 	header := make([]byte, 9)
@@ -174,7 +240,6 @@ func (p *RDBParser) parseHeader(r *bufio.Reader) error {
 	p.RDBVersion = string(header)[5:]
 
 	return nil
-
 }
 
 // parseMetadata parses the metadata section of the RDB file.
