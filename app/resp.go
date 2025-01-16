@@ -33,6 +33,11 @@ func (p *RESPParser) ParseToken(buf []byte) ([]string, bool, error) {
 
 	// Start of a new command
 	if p.remainingExpectedTokens == 0 {
+		// Parse Simple String
+		if s[0] == '+' {
+			return []string{s[1:]}, true, nil
+		}
+		// Prepare for parsing Array
 		if s[0] != '*' {
 			return nil, false, ErrUnexpectedStarter
 		}
