@@ -35,7 +35,9 @@ func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
 	var rconfig ReplicationConfig
 	if replicaOf == "" {
 		rconfig = ReplicationConfig{
-			Role: "master",
+			Role:                    "master",
+			MasterReplicationID:     GenerateMasterReplicationId(),
+			MasterReplicationOffset: 0,
 		}
 	} else {
 		s := strings.Split(replicaOf, " ")
@@ -44,9 +46,9 @@ func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
 			log.Fatal("Invalid port")
 		}
 		rconfig = ReplicationConfig{
-			Role:       "slave",
-			MasterHost: s[0],
-			MasterPort: port,
+			Role:            "slave",
+			SlaveMasterHost: s[0],
+			SlaveMasterPort: port,
 		}
 	}
 
@@ -101,7 +103,12 @@ func (r *Redis) HandleInfoCommand(args []string) ([]byte, error) {
 		return EncodeRESPBulkString(""), ErrInvalidCommand
 	}
 
-	return EncodeRESPBulkString(fmt.Sprintf("role:%s", r.rconfig.Role)), nil
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("role:%s%s", r.rconfig.Role, RESPDelimiter))
+	sb.WriteString(fmt.Sprintf("master_repl_offset:%d%s", r.rconfig.MasterReplicationOffset, RESPDelimiter))
+	sb.WriteString(fmt.Sprintf("master_replid:%s", r.rconfig.MasterReplicationID))
+
+	return EncodeRESPBulkString(sb.String()), nil
 }
 
 // Write writes a buffer to a connection.
