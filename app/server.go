@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var ErrInvalidCommand = errors.New("invalid command")
@@ -30,13 +31,29 @@ type Config struct {
 	DBFileName string
 }
 
-func NewRedis(config Config, storage Storage) *Redis {
+func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
+	var rconfig ReplicationConfig
+	if replicaOf == "" {
+		rconfig = ReplicationConfig{
+			Role: "master",
+		}
+	} else {
+		s := strings.Split(replicaOf, " ")
+		port, err := strconv.Atoi(s[1])
+		if err != nil {
+			log.Fatal("Invalid port")
+		}
+		rconfig = ReplicationConfig{
+			Role:       "slave",
+			MasterHost: s[0],
+			MasterPort: port,
+		}
+	}
+
 	return &Redis{
 		storage: storage,
 		config:  config,
-		rconfig: ReplicationConfig{
-			Role: "master",
-		},
+		rconfig: rconfig,
 	}
 }
 
@@ -223,26 +240,27 @@ func (r *Redis) Start() {
 func main() {
 	log.Println("Starting Application...")
 
-	redis_port := flag.Int("port", 6379, "the port to listen on")
-	redis_addr := flag.String("addr", "0.0.0.0", "the address to bind to")
-	rdb_dir := flag.String("dir", "/tmp/redis-files", "the path to the directory where the RDB file is stored")
-	rdb_file := flag.String("dbfilename", "dump.rdb", "the name of the RDB file")
+	redisPort := flag.Int("port", 6379, "the port to listen on")
+	redisAddr := flag.String("addr", "0.0.0.0", "the address to bind to")
+	rdbDir := flag.String("dir", "/tmp/redis-files", "the path to the directory where the RDB file is stored")
+	rdbFile := flag.String("dbfilename", "dump.rdb", "the name of the RDB file")
+	replicaOf := flag.String("replicaof", "", "the address of the master to replicate from")
 	flag.Parse()
 
 	config := Config{
-		Address:    *redis_addr,
-		Port:       *redis_port,
-		Dir:        *rdb_dir,
-		DBFileName: *rdb_file,
+		Address:    *redisAddr,
+		Port:       *redisPort,
+		Dir:        *rdbDir,
+		DBFileName: *rdbFile,
 	}
 
 	log.Println("Using config:", config)
 
 	var r Redis
-	rdb_path := *rdb_dir + "/" + *rdb_file
+	rdb_path := *rdbDir + "/" + *rdbFile
 	if _, err := os.Stat(rdb_path); errors.Is(err, os.ErrNotExist) {
 		log.Println("RDB file does not exist")
-		r = *NewRedis(config, NewInMemoryStorage())
+		r = *NewRedis(config, NewInMemoryStorage(), *replicaOf)
 	} else {
 		log.Println("RDB file exists")
 		rdb_parser := NewRDBParser(NewInMemoryStorage())
@@ -250,7 +268,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		r = *NewRedis(config, rdb_parser.Data)
+		r = *NewRedis(config, rdb_parser.Data, *replicaOf)
 	}
 
 	r.Start()
