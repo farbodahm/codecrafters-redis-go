@@ -222,9 +222,31 @@ func (r *Redis) handleConnection(c net.Conn) {
 	}
 }
 
+// StartReplication starts handshaking with master and is used by slave.
+func (r *Redis) StartReplication() {
+	master, err := net.Dial("tcp", fmt.Sprintf("%s:%d", r.rconfig.SlaveMasterHost, r.rconfig.SlaveMasterPort))
+	if err != nil {
+		log.Println("Error connecting to master:", err.Error())
+		return
+	}
+	defer master.Close()
+
+	log.Println("Connected to master")
+
+	if err := r.Write(master, EncodeRESPArray([]string{"PING"})); err != nil {
+		log.Println("Error writing to master:", err.Error())
+		return
+	}
+}
+
 // Start starts the Redis server.
 func (r *Redis) Start() {
 	log.Printf("Starting server on port %d\n", r.config.Port)
+
+	if r.rconfig.Role == "slave" {
+		log.Println("Starting replication")
+		go r.StartReplication()
+	}
 
 	l, err := net.Listen("tcp", fmt.Sprintf("%s:%d", r.config.Address, r.config.Port))
 	if err != nil {
