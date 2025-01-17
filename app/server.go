@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -143,12 +144,30 @@ func (r *Redis) HandleReplconfCommand(args []string) ([]byte, error) {
 	return EncodeRESPSimpleString("OK"), nil
 }
 
+// HandlePsyncCommand returns replication id, offset and initial RDB for the first handshake.
 func (r *Redis) HandlePsyncCommand(args []string) ([]byte, error) {
 	if len(args) != 3 {
 		return EncodeRESPBulkString(""), ErrInvalidCommand
 	}
 
-	return EncodeRESPSimpleString(fmt.Sprintf("FULLRESYNC %s %d", r.rconfig.MasterReplicationID, r.rconfig.MasterReplicationOffset)), nil
+	var buffer bytes.Buffer
+	buffer.Write(
+		EncodeRESPSimpleString(
+			fmt.Sprintf("FULLRESYNC %s %d", r.rconfig.MasterReplicationID, r.rconfig.MasterReplicationOffset),
+		),
+	)
+
+	// For the initial PSYNC, send RDB as well for full resync.
+	if args[1] == "?" {
+		rdb, err := ReadRDB("./redis-data/empty.rdb")
+		if err != nil {
+			return EncodeRESPBulkString(""), err
+		}
+		buffer.WriteString(fmt.Sprintf("$%d%s", len(rdb), RESPDelimiter))
+		buffer.Write(rdb)
+	}
+
+	return buffer.Bytes(), nil
 }
 
 // handleConnection handles a new connection to the Redis server.
