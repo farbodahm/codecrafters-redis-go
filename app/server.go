@@ -113,10 +113,13 @@ func (r *Redis) HandleInfoCommand(args []string) ([]byte, error) {
 }
 
 // Write writes a buffer to a connection.
-func (r *Redis) Write(c net.Conn, buf []byte) error {
-	_, err := c.Write(buf)
+func (r *Redis) Write(w *bufio.Writer, buf []byte) error {
+	_, err := w.Write(buf)
 	if err != nil {
-		log.Println("Error writing:", err.Error())
+		return fmt.Errorf("error sending: %w", err)
+	}
+	if err := w.Flush(); err != nil {
+		return fmt.Errorf("error flushing: %w", err)
 	}
 	return err
 }
@@ -175,6 +178,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
 
 	reader := bufio.NewReader(c)
+	w := bufio.NewWriter(c)
 	parser := RESPParser{}
 
 	for {
@@ -201,12 +205,12 @@ func (r *Redis) handleConnection(c net.Conn) {
 			switch args[0] {
 			case "PING":
 				log.Println("Responding with PONG")
-				if err := r.Write(c, EncodeRESPSimpleString("PONG")); err != nil {
+				if err := r.Write(w, EncodeRESPSimpleString("PONG")); err != nil {
 					break
 				}
 			case "ECHO":
 				log.Println("Responding with ECHO")
-				if err := r.Write(c, EncodeRESPBulkString(args[1])); err != nil {
+				if err := r.Write(w, EncodeRESPBulkString(args[1])); err != nil {
 					break
 				}
 			case "SET":
@@ -214,7 +218,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error setting value:", err.Error())
 				}
-				if err := r.Write(c, EncodeRESPSimpleString("OK")); err != nil {
+				if err := r.Write(w, EncodeRESPSimpleString("OK")); err != nil {
 					break
 				}
 			case "GET":
@@ -223,7 +227,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 					log.Println("Error getting value:", err.Error())
 					break
 				}
-				if err := r.Write(c, EncodeRESPBulkString(resp)); err != nil {
+				if err := r.Write(w, EncodeRESPBulkString(resp)); err != nil {
 					break
 				}
 
@@ -232,7 +236,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling CONFIG command:", err.Error())
 				}
-				if err := r.Write(c, resp); err != nil {
+				if err := r.Write(w, resp); err != nil {
 					break
 				}
 			case "KEYS":
@@ -240,7 +244,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling KEYS command:", err.Error())
 				}
-				if err := r.Write(c, resp); err != nil {
+				if err := r.Write(w, resp); err != nil {
 					break
 				}
 			case "INFO":
@@ -248,7 +252,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling INFO command:", err.Error())
 				}
-				if err := r.Write(c, resp); err != nil {
+				if err := r.Write(w, resp); err != nil {
 					break
 				}
 			case "REPLCONF":
@@ -256,7 +260,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling INFO command:", err.Error())
 				}
-				if err := r.Write(c, resp); err != nil {
+				if err := r.Write(w, resp); err != nil {
 					break
 				}
 			case "PSYNC":
@@ -264,7 +268,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling PSYNC command:", err.Error())
 				}
-				if err := r.Write(c, resp); err != nil {
+				if err := r.Write(w, resp); err != nil {
 					break
 				}
 			default:
@@ -277,13 +281,9 @@ func (r *Redis) handleConnection(c net.Conn) {
 // handshakePing is the first step for handshaking with master.
 // It will send a PING to the master and waits for a PONG as response.
 func (r *Redis) handshakePing(rw *bufio.ReadWriter, parser RESPParser) error {
-	_, err := rw.Write(EncodeRESPArray([]string{"PING"}))
+	err := r.Write(rw.Writer, (EncodeRESPArray([]string{"PING"})))
 	if err != nil {
 		return fmt.Errorf("error sending PING: %w", err)
-	}
-	err = rw.Flush()
-	if err != nil {
-		return fmt.Errorf("error flushing PING: %w", err)
 
 	}
 
@@ -310,12 +310,9 @@ func (r *Redis) handshakePing(rw *bufio.ReadWriter, parser RESPParser) error {
 // handshakeReplconf is the second step for handshaking with master.
 // It sends 2 times of REPLCONF message for communicating slave port and capa.
 func (r *Redis) handshakeReplconf(rw *bufio.ReadWriter, parser RESPParser) error {
-	_, err := rw.Write(EncodeRESPArray([]string{"REPLCONF", "listening-port", strconv.Itoa(r.config.Port)}))
+	err := r.Write(rw.Writer, EncodeRESPArray([]string{"REPLCONF", "listening-port", strconv.Itoa(r.config.Port)}))
 	if err != nil {
 		return fmt.Errorf("error sending REPLCONF: %w", err)
-	}
-	if err := rw.Flush(); err != nil {
-		return fmt.Errorf("error flushing REPLCONF: %w", err)
 	}
 
 	buf, err := rw.ReadBytes('\n')
@@ -334,12 +331,9 @@ func (r *Redis) handshakeReplconf(rw *bufio.ReadWriter, parser RESPParser) error
 		return errors.New("expected OK from master")
 	}
 
-	_, err = rw.Write(EncodeRESPArray([]string{"REPLCONF", "capa", "psync2"}))
+	err = r.Write(rw.Writer, EncodeRESPArray([]string{"REPLCONF", "capa", "psync2"}))
 	if err != nil {
 		return fmt.Errorf("error sending REPLCONF: %w", err)
-	}
-	if err := rw.Flush(); err != nil {
-		return fmt.Errorf("error flushing REPLCONF: %w", err)
 	}
 
 	buf, err = rw.ReadBytes('\n')
@@ -364,12 +358,9 @@ func (r *Redis) handshakeReplconf(rw *bufio.ReadWriter, parser RESPParser) error
 // handshakePsync is the 3rd step for handshaking with master.
 // It sends a PSYNC command and waits for the replication id and offset.
 func (r *Redis) handshakePsync(rw *bufio.ReadWriter, parser RESPParser) error {
-	_, err := rw.Write(EncodeRESPArray([]string{"PSYNC", "?", "-1"}))
+	err := r.Write(rw.Writer, EncodeRESPArray([]string{"PSYNC", "?", "-1"}))
 	if err != nil {
 		return fmt.Errorf("error sending PSYNC: %w", err)
-	}
-	if err := rw.Flush(); err != nil {
-		return fmt.Errorf("error flushing PSYNC: %w", err)
 	}
 
 	buf, err := rw.ReadBytes('\n')
