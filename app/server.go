@@ -143,6 +143,14 @@ func (r *Redis) HandleReplconfCommand(args []string) ([]byte, error) {
 	return EncodeRESPSimpleString("OK"), nil
 }
 
+func (r *Redis) HandlePsyncCommand(args []string) ([]byte, error) {
+	if len(args) != 3 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	return EncodeRESPSimpleString(fmt.Sprintf("FULLRESYNC %s %d", r.rconfig.MasterReplicationID, r.rconfig.MasterReplicationOffset)), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -228,6 +236,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				resp, err := r.HandleReplconfCommand(args)
 				if err != nil {
 					log.Println("Error handling INFO command:", err.Error())
+				}
+				if err := r.Write(c, resp); err != nil {
+					break
+				}
+			case "PSYNC":
+				resp, err := r.HandlePsyncCommand(args)
+				if err != nil {
+					log.Println("Error handling PSYNC command:", err.Error())
 				}
 				if err := r.Write(c, resp); err != nil {
 					break
@@ -326,6 +342,37 @@ func (r *Redis) handshakeReplconf(rw *bufio.ReadWriter, parser RESPParser) error
 	return nil
 }
 
+// handshakePsync is the 3rd step for handshaking with master.
+// It sends a PSYNC command and waits for the replication id and offset.
+func (r *Redis) handshakePsync(rw *bufio.ReadWriter, parser RESPParser) error {
+	_, err := rw.Write(EncodeRESPArray([]string{"PSYNC", "?", "-1"}))
+	if err != nil {
+		return fmt.Errorf("error sending PSYNC: %w", err)
+	}
+	if err := rw.Flush(); err != nil {
+		return fmt.Errorf("error flushing PSYNC: %w", err)
+	}
+
+	buf, err := rw.ReadBytes('\n')
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("error reading PSYNC response: %w", err)
+	}
+
+	args, ready, err := parser.ParseToken(buf)
+	if err != nil {
+		return fmt.Errorf("error parsing PSYNC response: %w", err)
+	}
+	if !ready || len(args) != 3 {
+		return errors.New("invalid response from master")
+	}
+	if args[0] != "FULLRESYNC" {
+		return errors.New("expected FULLRESYNC from master")
+	}
+	// TODO: Handle response
+
+	return nil
+}
+
 // StartReplication starts handshaking with master and is used by slave.
 func (r *Redis) StartReplication() {
 	master, err := net.Dial("tcp", fmt.Sprintf("%s:%d", r.rconfig.SlaveMasterHost, r.rconfig.SlaveMasterPort))
@@ -342,16 +389,22 @@ func (r *Redis) StartReplication() {
 	rw := bufio.NewReadWriter(reader, writer)
 
 	if err := r.handshakePing(rw, parser); err != nil {
-		log.Println("Error during handshake:", err.Error())
+		log.Println("Error during PIING handshake:", err.Error())
 		return
 	}
 	log.Println("Ping Handshake with master completed")
 
 	if err := r.handshakeReplconf(rw, parser); err != nil {
-		log.Println("Error during handshake:", err.Error())
+		log.Println("Error during REPLCONF handshake:", err.Error())
 		return
 	}
 	log.Println("Replconf Handshake with master completed")
+
+	if err := r.handshakePsync(rw, parser); err != nil {
+		log.Println("Error during PSYNC handshake:", err.Error())
+		return
+	}
+	log.Println("PSYNC Handshake with master completed")
 }
 
 // Start starts the Redis server.
