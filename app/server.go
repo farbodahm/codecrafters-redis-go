@@ -22,6 +22,11 @@ type Redis struct {
 	storage Storage
 	config  Config
 	rconfig ReplicationConfig
+
+	// master is the connection to master after handshake finished successfully
+	master *bufio.ReadWriter
+	// slaves is the connections to slaves after handshake finished successfully
+	slaves []*bufio.ReadWriter
 }
 
 // Config holds the configuration for the Redis server.
@@ -57,11 +62,18 @@ func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
 		storage: storage,
 		config:  config,
 		rconfig: rconfig,
+		slaves:  []*bufio.ReadWriter{},
 	}
 }
 
 // HandleSetCommand handles the SET command including the optional TTL argument.
 func (r *Redis) HandleSetCommand(args []string) error {
+	if r.rconfig.Role == "master" {
+		if err := r.PropagateToSlaves(EncodeRESPArray(args)); err != nil {
+			log.Println("WARN: Failed propagating", args, "to slaves")
+		}
+	}
+
 	if len(args) == 3 {
 		return r.storage.Set(args[1], args[2])
 	}
@@ -178,7 +190,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
 
 	reader := bufio.NewReader(c)
-	w := bufio.NewWriter(c)
+	writer := bufio.NewWriter(c)
 	parser := RESPParser{}
 
 	for {
@@ -205,12 +217,12 @@ func (r *Redis) handleConnection(c net.Conn) {
 			switch args[0] {
 			case "PING":
 				log.Println("Responding with PONG")
-				if err := r.Write(w, EncodeRESPSimpleString("PONG")); err != nil {
+				if err := r.Write(writer, EncodeRESPSimpleString("PONG")); err != nil {
 					break
 				}
 			case "ECHO":
 				log.Println("Responding with ECHO")
-				if err := r.Write(w, EncodeRESPBulkString(args[1])); err != nil {
+				if err := r.Write(writer, EncodeRESPBulkString(args[1])); err != nil {
 					break
 				}
 			case "SET":
@@ -218,7 +230,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error setting value:", err.Error())
 				}
-				if err := r.Write(w, EncodeRESPSimpleString("OK")); err != nil {
+				if err := r.Write(writer, EncodeRESPSimpleString("OK")); err != nil {
 					break
 				}
 			case "GET":
@@ -227,7 +239,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 					log.Println("Error getting value:", err.Error())
 					break
 				}
-				if err := r.Write(w, EncodeRESPBulkString(resp)); err != nil {
+				if err := r.Write(writer, EncodeRESPBulkString(resp)); err != nil {
 					break
 				}
 
@@ -236,7 +248,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling CONFIG command:", err.Error())
 				}
-				if err := r.Write(w, resp); err != nil {
+				if err := r.Write(writer, resp); err != nil {
 					break
 				}
 			case "KEYS":
@@ -244,7 +256,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling KEYS command:", err.Error())
 				}
-				if err := r.Write(w, resp); err != nil {
+				if err := r.Write(writer, resp); err != nil {
 					break
 				}
 			case "INFO":
@@ -252,7 +264,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling INFO command:", err.Error())
 				}
-				if err := r.Write(w, resp); err != nil {
+				if err := r.Write(writer, resp); err != nil {
 					break
 				}
 			case "REPLCONF":
@@ -260,7 +272,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling INFO command:", err.Error())
 				}
-				if err := r.Write(w, resp); err != nil {
+				if err := r.Write(writer, resp); err != nil {
 					break
 				}
 			case "PSYNC":
@@ -268,14 +280,29 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling PSYNC command:", err.Error())
 				}
-				if err := r.Write(w, resp); err != nil {
+				if err := r.Write(writer, resp); err != nil {
 					break
 				}
+				// TODO: only add of connection doesn't exist
+				r.slaves = append(r.slaves, bufio.NewReadWriter(reader, writer))
 			default:
 				log.Println("Unknown command:", args[0])
 			}
 		}
 	}
+}
+
+// PropagateToSlaves is a fire-and-forget way for sending the given buffer to slaves of the current master.
+// It doesn't wait for receiving an ACK from slave.
+func (r *Redis) PropagateToSlaves(buf []byte) error {
+	for i, slave := range r.slaves {
+		log.Println("Propagating to slave", i)
+		if err := r.Write(slave.Writer, buf); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // handshakePing is the first step for handshaking with master.
@@ -355,6 +382,33 @@ func (r *Redis) handshakeReplconf(rw *bufio.ReadWriter, parser RESPParser) error
 	return nil
 }
 
+// recieveRDB (used by slave) receives RDB from master.
+// During the final stage of first PSYNC handshake, master sends its RDB for syncing
+// master's state with the slave.
+func (r *Redis) recieveRDB(rw *bufio.ReadWriter) error {
+	log.Println("Receiving RDB")
+	// RDB received during handshaking has similar structure to a RESP bulk string but without
+	// /r/n at the end. So we are not using REST parser here as technically it's not RESP encoded.
+	buf, err := rw.ReadBytes('\n')
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("error reading PSYNC RDB response: %w", err)
+	}
+	buf = buf[1:]
+	buf = bytes.TrimRight(buf, RESPDelimiter)
+	rdbSize, err := strconv.Atoi(string(buf))
+	if err != nil {
+		return fmt.Errorf("error parsing RDB size: %w", err)
+	}
+	log.Println("RDB size:", rdbSize)
+	buffer := make([]byte, rdbSize)
+	_, err = rw.Read(buffer)
+	if err != nil {
+		return fmt.Errorf("error reading RDB: %w", err)
+	}
+
+	return nil
+}
+
 // handshakePsync is the 3rd step for handshaking with master.
 // It sends a PSYNC command and waits for the replication id and offset.
 func (r *Redis) handshakePsync(rw *bufio.ReadWriter, parser RESPParser) error {
@@ -372,14 +426,13 @@ func (r *Redis) handshakePsync(rw *bufio.ReadWriter, parser RESPParser) error {
 	if err != nil {
 		return fmt.Errorf("error parsing PSYNC response: %w", err)
 	}
-	if !ready || len(args) != 3 {
+	if !ready || len(args) != 1 {
 		return errors.New("invalid response from master")
 	}
-	if args[0] != "FULLRESYNC" {
-		return errors.New("expected FULLRESYNC from master")
+	// TODO: Properly extract replication id
+	if err := r.recieveRDB(rw); err != nil {
+		return fmt.Errorf("error receiving RDB: %w", err)
 	}
-	// TODO: Handle response
-
 	return nil
 }
 
@@ -415,6 +468,9 @@ func (r *Redis) StartReplication() {
 		return
 	}
 	log.Println("PSYNC Handshake with master completed")
+	log.Println("Handshake with master completed")
+	r.master = rw
+	r.handleConnection(master)
 }
 
 // Start starts the Redis server.

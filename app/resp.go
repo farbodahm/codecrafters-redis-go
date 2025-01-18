@@ -37,6 +37,16 @@ func (p *RESPParser) ParseToken(buf []byte) ([]string, bool, error) {
 		if s[0] == '+' {
 			return []string{s[1:]}, true, nil
 		}
+		// Parse Bulk String
+		if s[0] == '$' {
+			i, err := strconv.Atoi(s[1:])
+			if err != nil {
+				return nil, false, err
+			}
+			p.nextArgLength = int8(i)
+			p.remainingExpectedTokens = 1
+			return nil, false, nil
+		}
 		// Prepare for parsing Array
 		if s[0] != '*' {
 			return nil, false, ErrUnexpectedStarter
