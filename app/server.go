@@ -292,6 +292,46 @@ func (r *Redis) handleConnection(c net.Conn) {
 	}
 }
 
+// handleReplicationConnection, used by slave, handles a replication connection from master.
+func (r *Redis) handleReplicationConnection(c net.Conn) {
+	defer c.Close()
+
+	reader := bufio.NewReader(c)
+	parser := RESPParser{}
+
+	for {
+		buf, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				continue
+			}
+			log.Println("Error reading:", err.Error())
+			break
+		}
+
+		args, ready, err := parser.ParseToken(buf)
+		if err != nil {
+			log.Println("Error parsing:", err.Error())
+			break
+		}
+		if ready {
+			log.Println("Command ready:", args)
+
+			// TODO: Implement the actual command handling. Probably need another state machine here.
+			switch args[0] {
+			case "SET":
+				log.Println("Received SET from master", args)
+				err := r.HandleSetCommand(args)
+				if err != nil {
+					log.Println("Error setting value:", err.Error())
+				}
+			default:
+				log.Println("Unknown command from master:", args[0])
+			}
+		}
+	}
+}
+
 // PropagateToSlaves is a fire-and-forget way for sending the given buffer to slaves of the current master.
 // It doesn't wait for receiving an ACK from slave.
 func (r *Redis) PropagateToSlaves(buf []byte) error {
@@ -470,7 +510,7 @@ func (r *Redis) StartReplication() {
 	log.Println("PSYNC Handshake with master completed")
 	log.Println("Handshake with master completed")
 	r.master = rw
-	r.handleConnection(master)
+	r.handleReplicationConnection(master)
 }
 
 // Start starts the Redis server.
