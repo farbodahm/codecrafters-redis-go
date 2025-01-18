@@ -152,11 +152,20 @@ func (r *Redis) HandleKeysCommand(args []string) ([]byte, error) {
 
 // HandleReplconfCommand handles the REPLCONF command.
 func (r *Redis) HandleReplconfCommand(args []string) ([]byte, error) {
-	if len(args) != 3 {
-		return EncodeRESPBulkString(""), ErrInvalidCommand
+
+	switch strings.ToLower(args[1]) {
+	case "listening-port", "capa":
+		// TODO: properly handle this case when needed; Currently we are not using this functionality
+		return EncodeRESPSimpleString("OK"), nil
+	case "getack":
+		return EncodeRESPArray([]string{"REPLCONF", "ACK", "0"}), nil
+	case "ack":
+		// TODO: Implement
+		log.Println("Received replconf ack")
+		return []byte{}, nil
 	}
-	// TODO: Implement the actual REPLCONF command handling.
-	return EncodeRESPSimpleString("OK"), nil
+
+	return EncodeRESPBulkString(""), ErrInvalidCommand
 }
 
 // HandlePsyncCommand returns replication id, offset and initial RDB for the first handshake.
@@ -172,7 +181,8 @@ func (r *Redis) HandlePsyncCommand(args []string) ([]byte, error) {
 		),
 	)
 
-	// For the initial PSYNC, send RDB as well for full resync.
+	// For the initial PSYNC:
+	// 1) send RDB as well for full resync.
 	if args[1] == "?" {
 		rdb, err := ReadRDB("./redis-data/empty.rdb")
 		if err != nil {
@@ -270,7 +280,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 			case "REPLCONF":
 				resp, err := r.HandleReplconfCommand(args)
 				if err != nil {
-					log.Println("Error handling INFO command:", err.Error())
+					log.Println("Error handling REPLCONF command:", err.Error())
 				}
 				if err := r.Write(writer, resp); err != nil {
 					break
@@ -293,14 +303,11 @@ func (r *Redis) handleConnection(c net.Conn) {
 }
 
 // handleReplicationConnection, used by slave, handles a replication connection from master.
-func (r *Redis) handleReplicationConnection(c net.Conn) {
-	defer c.Close()
-
-	reader := bufio.NewReader(c)
+func (r *Redis) handleReplicationConnection(rw *bufio.ReadWriter) {
 	parser := RESPParser{}
 
 	for {
-		buf, err := reader.ReadBytes('\n')
+		buf, err := rw.ReadBytes('\n')
 		if err != nil {
 			if err == io.EOF {
 				continue
@@ -324,6 +331,14 @@ func (r *Redis) handleReplicationConnection(c net.Conn) {
 				err := r.HandleSetCommand(args)
 				if err != nil {
 					log.Println("Error setting value:", err.Error())
+				}
+			case "REPLCONF":
+				resp, err := r.HandleReplconfCommand(args)
+				if err != nil {
+					log.Println("Error handling REPLCONF command:", err.Error())
+				}
+				if err := r.Write(rw.Writer, resp); err != nil {
+					break
 				}
 			default:
 				log.Println("Unknown command from master:", args[0])
@@ -510,7 +525,7 @@ func (r *Redis) StartReplication() {
 	log.Println("PSYNC Handshake with master completed")
 	log.Println("Handshake with master completed")
 	r.master = rw
-	r.handleReplicationConnection(master)
+	r.handleReplicationConnection(rw)
 }
 
 // Start starts the Redis server.
