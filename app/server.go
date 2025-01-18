@@ -158,7 +158,7 @@ func (r *Redis) HandleReplconfCommand(args []string) ([]byte, error) {
 		// TODO: properly handle this case when needed; Currently we are not using this functionality
 		return EncodeRESPSimpleString("OK"), nil
 	case "getack":
-		return EncodeRESPArray([]string{"REPLCONF", "ACK", "0"}), nil
+		return EncodeRESPArray([]string{"REPLCONF", "ACK", fmt.Sprintf("%d", r.rconfig.bytesProcessed)}), nil
 	case "ack":
 		// TODO: Implement
 		log.Println("Received replconf ack")
@@ -332,6 +332,8 @@ func (r *Redis) handleReplicationConnection(rw *bufio.ReadWriter) {
 				if err != nil {
 					log.Println("Error setting value:", err.Error())
 				}
+			case "PING":
+				log.Println("Received PING from master")
 			case "REPLCONF":
 				resp, err := r.HandleReplconfCommand(args)
 				if err != nil {
@@ -343,7 +345,9 @@ func (r *Redis) handleReplicationConnection(rw *bufio.ReadWriter) {
 			default:
 				log.Println("Unknown command from master:", args[0])
 			}
+			r.rconfig.bytesProcessed = r.rconfig.bytesReceived + len(buf)
 		}
+		r.rconfig.bytesReceived += len(buf)
 	}
 }
 

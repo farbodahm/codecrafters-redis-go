@@ -16,6 +16,8 @@ type ReplicationConfig struct {
 	// Slave Config
 	SlaveMasterHost string
 	SlaveMasterPort int
+	bytesReceived   int
+	bytesProcessed  int
 }
 
 // GenerateMasterReplicationId generates a random 40 char string for replication id
