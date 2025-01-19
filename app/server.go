@@ -203,7 +203,7 @@ func (r *Redis) HandleWaitCommand(args []string) ([]byte, error) {
 
 	// TODO: Implement
 
-	return EncodeRESPInteger(0), nil
+	return EncodeRESPInteger(len(r.slaves)), nil
 }
 
 // handleConnection handles a new connection to the Redis server.
