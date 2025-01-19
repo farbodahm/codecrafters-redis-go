@@ -113,3 +113,8 @@ func EncodeRESPArray(args []string) []byte {
 
 	return buf.Bytes()
 }
+
+// EncodeRESPInteger encodes an int into the RESP format.
+func EncodeRESPInteger(i int) []byte {
+	return []byte(":" + strconv.Itoa(i) + RESPDelimiter)
+}

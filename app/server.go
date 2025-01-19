@@ -195,6 +195,17 @@ func (r *Redis) HandlePsyncCommand(args []string) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
+// HandleWaitCommand
+func (r *Redis) HandleWaitCommand(args []string) ([]byte, error) {
+	if len(args) != 3 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	// TODO: Implement
+
+	return EncodeRESPInteger(0), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -295,6 +306,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				}
 				// TODO: only add of connection doesn't exist
 				r.slaves = append(r.slaves, bufio.NewReadWriter(reader, writer))
+			case "WAIT":
+				resp, err := r.HandleWaitCommand(args)
+				if err != nil {
+					log.Println("Error handling WAIT command:", err.Error())
+				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
 			default:
 				log.Println("Unknown command:", args[0])
 			}
