@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,13 @@ type ReplicationConfig struct {
 	SlaveMasterPort int
 	bytesReceived   int
 	bytesProcessed  int
+}
+
+// Slave represents a replica instance used in master process.
+type Slave struct {
+	id        string
+	bytesSend int
+	rw        *bufio.ReadWriter
 }
 
 // GenerateMasterReplicationId generates a random 40 char string for replication id

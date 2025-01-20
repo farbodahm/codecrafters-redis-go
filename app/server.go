@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var ErrInvalidCommand = errors.New("invalid command")
@@ -26,7 +27,9 @@ type Redis struct {
 	// master is the connection to master after handshake finished successfully
 	master *bufio.ReadWriter
 	// slaves is the connections to slaves after handshake finished successfully
-	slaves []*bufio.ReadWriter
+	slaves map[string]*Slave
+	// ackChan represents id of the slave which has processed all of the propagated messages
+	ackChan chan string
 }
 
 // Config holds the configuration for the Redis server.
@@ -62,7 +65,8 @@ func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
 		storage: storage,
 		config:  config,
 		rconfig: rconfig,
-		slaves:  []*bufio.ReadWriter{},
+		slaves:  make(map[string]*Slave),
+		ackChan: make(chan string, 100),
 	}
 }
 
@@ -151,8 +155,8 @@ func (r *Redis) HandleKeysCommand(args []string) ([]byte, error) {
 }
 
 // HandleReplconfCommand handles the REPLCONF command.
-func (r *Redis) HandleReplconfCommand(args []string) ([]byte, error) {
-
+// If this function is used by master, the related replica to the connection will also be passed.
+func (r *Redis) HandleReplconfCommand(s *Slave, args []string) ([]byte, error) {
 	switch strings.ToLower(args[1]) {
 	case "listening-port", "capa":
 		// TODO: properly handle this case when needed; Currently we are not using this functionality
@@ -160,8 +164,18 @@ func (r *Redis) HandleReplconfCommand(args []string) ([]byte, error) {
 	case "getack":
 		return EncodeRESPArray([]string{"REPLCONF", "ACK", fmt.Sprintf("%d", r.rconfig.bytesProcessed)}), nil
 	case "ack":
-		// TODO: Implement
-		log.Println("Received replconf ack")
+		processedBytes, err := strconv.Atoi(args[2])
+		if err != nil {
+			return EncodeRESPBulkString(""), fmt.Errorf("invalid ack value: %w", err)
+		}
+		if processedBytes == r.slaves[s.id].bytesSend-37 {
+			log.Println("ACK ", s.id, processedBytes)
+			r.ackChan <- s.id
+		} else {
+			log.Println("WARN: ACK ", s.id, " but not all of the data was processed", processedBytes)
+			log.Println("Sent bytes:", r.slaves[s.id].bytesSend-37, " Received ack bytes:", processedBytes)
+		}
+
 		return []byte{}, nil
 	}
 
@@ -200,10 +214,44 @@ func (r *Redis) HandleWaitCommand(args []string) ([]byte, error) {
 	if len(args) != 3 {
 		return EncodeRESPBulkString(""), ErrInvalidCommand
 	}
+	ackCount, err := strconv.Atoi(args[1])
+	if err != nil {
+		return EncodeRESPBulkString(""), fmt.Errorf("invalid ackCount value: %w", err)
+	}
+	timeout, err := strconv.Atoi(args[2])
+	if err != nil {
+		return EncodeRESPBulkString(""), fmt.Errorf("invalid timeout value: %w", err)
+	}
 
-	// TODO: Implement
+	// If nothing is propagated to slaves, return immediately
+	if r.slaves == nil || len(r.slaves) == 0 {
+		return EncodeRESPInteger(0), nil
+	}
+	for _, slave := range r.slaves {
+		if slave.bytesSend > 0 {
+			break
+		}
+		return EncodeRESPInteger(len(r.slaves)), nil
+	}
 
-	return EncodeRESPInteger(len(r.slaves)), nil
+	// Ask slaves to send their processed bytes
+	// TODO: Refactor in a way to ask for processed bytes periodically
+	if err := r.PropagateToSlaves(EncodeRESPArray([]string{"REPLCONF", "GETACK", "*"})); err != nil {
+		return EncodeRESPBulkString(""), fmt.Errorf("failed to propagate ack requests to slaves: %w", err)
+	}
+
+	totalAcks := 0
+	for {
+		select {
+		case <-r.ackChan:
+			totalAcks++
+			if totalAcks == ackCount {
+				return EncodeRESPInteger(totalAcks), nil
+			}
+		case <-time.After(time.Duration(timeout) * time.Millisecond):
+			return EncodeRESPInteger(totalAcks), nil
+		}
+	}
 }
 
 // handleConnection handles a new connection to the Redis server.
@@ -289,7 +337,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 					break
 				}
 			case "REPLCONF":
-				resp, err := r.HandleReplconfCommand(args)
+				resp, err := r.HandleReplconfCommand(r.slaves[c.RemoteAddr().String()], args)
 				if err != nil {
 					log.Println("Error handling REPLCONF command:", err.Error())
 				}
@@ -304,8 +352,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err := r.Write(writer, resp); err != nil {
 					break
 				}
-				// TODO: only add of connection doesn't exist
-				r.slaves = append(r.slaves, bufio.NewReadWriter(reader, writer))
+				r.slaves[c.RemoteAddr().String()] = &Slave{id: c.RemoteAddr().String(), rw: bufio.NewReadWriter(reader, writer)}
 			case "WAIT":
 				resp, err := r.HandleWaitCommand(args)
 				if err != nil {
@@ -354,7 +401,7 @@ func (r *Redis) handleReplicationConnection(rw *bufio.ReadWriter) {
 			case "PING":
 				log.Println("Received PING from master")
 			case "REPLCONF":
-				resp, err := r.HandleReplconfCommand(args)
+				resp, err := r.HandleReplconfCommand(nil, args)
 				if err != nil {
 					log.Println("Error handling REPLCONF command:", err.Error())
 				}
@@ -373,11 +420,13 @@ func (r *Redis) handleReplicationConnection(rw *bufio.ReadWriter) {
 // PropagateToSlaves is a fire-and-forget way for sending the given buffer to slaves of the current master.
 // It doesn't wait for receiving an ACK from slave.
 func (r *Redis) PropagateToSlaves(buf []byte) error {
-	for i, slave := range r.slaves {
-		log.Println("Propagating to slave", i)
-		if err := r.Write(slave.Writer, buf); err != nil {
+	for id, slave := range r.slaves {
+		log.Println("Propagating to slave", id)
+		if err := r.Write(slave.rw.Writer, buf); err != nil {
 			return err
 		}
+		slave.bytesSend += len(buf)
+		log.Println("Propagated to slave", id, "with", slave.bytesSend, "bytes")
 	}
 
 	return nil
