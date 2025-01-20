@@ -40,6 +40,27 @@ type Config struct {
 	DBFileName string
 }
 
+// ReplicationConfig holds all config related to Redis replication
+type ReplicationConfig struct {
+	Role string
+	// Master Config
+	MasterReplicationID     string
+	MasterReplicationOffset int
+
+	// Slave Config
+	SlaveMasterHost string
+	SlaveMasterPort int
+	bytesReceived   int
+	bytesProcessed  int
+}
+
+// Slave represents a replica instance used in master process.
+type Slave struct {
+	id        string
+	bytesSend int
+	rw        *bufio.ReadWriter
+}
+
 func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
 	var rconfig ReplicationConfig
 	if replicaOf == "" {
