@@ -275,6 +275,21 @@ func (r *Redis) HandleWaitCommand(args []string) ([]byte, error) {
 	}
 }
 
+// HandleTypeCommand returns type of the given key.
+func (r *Redis) HandleTypeCommand(args []string) ([]byte, error) {
+	if len(args) != 2 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	_, err := r.storage.Get(args[1])
+	if err == ErrKeyNotFound {
+		return EncodeRESPSimpleString("none"), nil
+	}
+
+	// TODO: support for other types
+	return EncodeRESPSimpleString("string"), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -378,6 +393,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				resp, err := r.HandleWaitCommand(args)
 				if err != nil {
 					log.Println("Error handling WAIT command:", err.Error())
+				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+			case "TYPE":
+				resp, err := r.HandleTypeCommand(args)
+				if err != nil {
+					log.Println("Error handling TYPE command:", err.Error())
 				}
 				if err := r.Write(writer, resp); err != nil {
 					break
