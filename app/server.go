@@ -21,6 +21,7 @@ var ErrInvalidConfigParameter = errors.New("invalid config parameter")
 // Redis is a simple Redis server implementation.
 type Redis struct {
 	storage Storage
+	ss      StreamsStorage
 	config  Config
 	rconfig ReplicationConfig
 
@@ -61,7 +62,7 @@ type Slave struct {
 	rw        *bufio.ReadWriter
 }
 
-func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
+func NewRedis(config Config, storage Storage, ss StreamsStorage, replicaOf string) *Redis {
 	var rconfig ReplicationConfig
 	if replicaOf == "" {
 		rconfig = ReplicationConfig{
@@ -84,6 +85,7 @@ func NewRedis(config Config, storage Storage, replicaOf string) *Redis {
 
 	return &Redis{
 		storage: storage,
+		ss:      ss,
 		config:  config,
 		rconfig: rconfig,
 		slaves:  make(map[string]*Slave),
@@ -694,7 +696,7 @@ func main() {
 	rdb_path := *rdbDir + "/" + *rdbFile
 	if _, err := os.Stat(rdb_path); errors.Is(err, os.ErrNotExist) {
 		log.Println("RDB file does not exist")
-		r = *NewRedis(config, NewInMemoryStorage(), *replicaOf)
+		r = *NewRedis(config, NewInMemoryStorage(), NewInMemoryOrderedMap(), *replicaOf)
 	} else {
 		log.Println("RDB file exists")
 		rdb_parser := NewRDBParser(NewInMemoryStorage())
@@ -702,7 +704,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		r = *NewRedis(config, rdb_parser.Data, *replicaOf)
+		r = *NewRedis(config, rdb_parser.Data, NewInMemoryOrderedMap(), *replicaOf)
 	}
 
 	r.Start()
