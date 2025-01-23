@@ -1,11 +1,17 @@
 package main
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
 var _ OrderedMap = (*LinkedOrderedMap)(nil)
 
 // OrderedMap defines the behavior of a map that preserves insertion order
 // and allows range queries.
 type OrderedMap interface {
-	Add(id string, data map[string]string)
+	Add(id string, data map[string]string) error
 	Range(startID, endID string) []XRecord
 }
 
@@ -33,10 +39,17 @@ func NewLinkedOrderedMap() *LinkedOrderedMap {
 }
 
 // Add adds a new key-value pair to the LinkedOrderedMap.
-func (om *LinkedOrderedMap) Add(id string, data map[string]string) {
+func (om *LinkedOrderedMap) Add(id string, data map[string]string) error {
+	milisecondsTime, sequence, err := om.verifyId(id)
+	if err != nil {
+		return err
+	}
+
 	v := XRecord{
-		Id:   id,
-		Data: data,
+		Id:               id,
+		MillisecondsTime: milisecondsTime,
+		SequenceNumber:   sequence,
+		Data:             data,
 	}
 	node := &OMNode{
 		Value: v,
@@ -52,6 +65,36 @@ func (om *LinkedOrderedMap) Add(id string, data map[string]string) {
 	}
 
 	om.Nodes[id] = node
+	return nil
+}
+
+// verifyId verifies if the id is greater than the last id in the LinkedOrderedMap.
+// It returns the milisecondsTime and sequence number of the id.
+func (om *LinkedOrderedMap) verifyId(id string) (int64, int, error) {
+	s := strings.Split(id, "-")
+	milisecondsTime, err := strconv.ParseInt(s[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("error converting milisecondsTime to int: %w", err)
+	}
+	sequence, err := strconv.Atoi(s[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("error converting sequence to int: %w", err)
+	}
+
+	if milisecondsTime <= 0 && sequence <= 0 {
+		return 0, 0, fmt.Errorf("ERR The ID specified in XADD must be greater than 0-0")
+	}
+
+	// check if the id is greater than the last id
+	if om.Tail != nil {
+		lastMilisecondsTime := om.Tail.Value.MillisecondsTime
+		lastSequence := om.Tail.Value.SequenceNumber
+		if milisecondsTime < lastMilisecondsTime || (milisecondsTime == lastMilisecondsTime && sequence <= lastSequence) {
+			return 0, 0, fmt.Errorf("ERR The ID specified in XADD is equal or smaller than the target stream top item")
+		}
+	}
+
+	return milisecondsTime, sequence, nil
 }
 
 // Range returns a range of nodes from the LinkedOrderedMap starting from `start` key to `end` key.

@@ -309,7 +309,9 @@ func (r *Redis) HandleXAddCommand(args []string) ([]byte, error) {
 		records[args[i]] = args[i+1]
 	}
 
-	r.ss.XAdd(streamName, recordId, records)
+	if err := r.ss.XAdd(streamName, recordId, records); err != nil {
+		return EncodeRESPError(err.Error()), nil
+	}
 
 	return EncodeRESPBulkString(recordId), nil
 }

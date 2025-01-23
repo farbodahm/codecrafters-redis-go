@@ -4,13 +4,15 @@ var _ StreamsStorage = (*InMemoryLinkedOrderedMap)(nil)
 
 // XRecord represents a record in Streams.
 type XRecord struct {
-	Id   string
-	Data map[string]string
+	Id               string
+	MillisecondsTime int64
+	SequenceNumber   int
+	Data             map[string]string
 }
 
 // StreamsStorage is an interface for storing and retrieving streams of data.
 type StreamsStorage interface {
-	XAdd(stream, id string, data map[string]string)
+	XAdd(stream, id string, data map[string]string) error
 	XRange(stream, start_id, end_id string) []XRecord
 	XGetStream(stream string) (OrderedMap, bool)
 }
@@ -27,11 +29,11 @@ func NewInMemoryLinkedOrderedMap() *InMemoryLinkedOrderedMap {
 	return storage
 }
 
-func (storage *InMemoryLinkedOrderedMap) XAdd(stream, id string, data map[string]string) {
+func (storage *InMemoryLinkedOrderedMap) XAdd(stream, id string, data map[string]string) error {
 	if _, ok := storage.streams[stream]; !ok {
 		storage.streams[stream] = NewLinkedOrderedMap()
 	}
-	storage.streams[stream].Add(id, data)
+	return storage.streams[stream].Add(id, data)
 }
 
 func (storage *InMemoryLinkedOrderedMap) XRange(stream, start_id, end_id string) []XRecord {

@@ -118,3 +118,8 @@ func EncodeRESPArray(args []string) []byte {
 func EncodeRESPInteger(i int) []byte {
 	return []byte(":" + strconv.Itoa(i) + RESPDelimiter)
 }
+
+// EncodeRESPError encodes an error into the RESP format.
+func EncodeRESPError(s string) []byte {
+	return []byte("-" + s + RESPDelimiter)
+}
