@@ -284,12 +284,34 @@ func (r *Redis) HandleTypeCommand(args []string) ([]byte, error) {
 	}
 
 	_, err := r.storage.Get(args[1])
-	if err == ErrKeyNotFound {
-		return EncodeRESPSimpleString("none"), nil
+	if err == nil {
+		return EncodeRESPSimpleString("string"), nil
 	}
 
-	// TODO: support for other types
-	return EncodeRESPSimpleString("string"), nil
+	_, exists := r.ss.XGetStream(args[1])
+	if exists {
+		return EncodeRESPSimpleString("stream"), nil
+	}
+
+	return EncodeRESPSimpleString("none"), nil
+}
+
+// HandleXAddCommand adds a new record(s) to the stream.
+func (r *Redis) HandleXAddCommand(args []string) ([]byte, error) {
+	if len(args) < 4 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	streamName := args[1]
+	recordId := args[2]
+	records := make(map[string]string)
+	for i := 3; i < len(args); i += 2 {
+		records[args[i]] = args[i+1]
+	}
+
+	r.ss.XAdd(streamName, recordId, records)
+
+	return EncodeRESPBulkString(recordId), nil
 }
 
 // handleConnection handles a new connection to the Redis server.
@@ -403,6 +425,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				resp, err := r.HandleTypeCommand(args)
 				if err != nil {
 					log.Println("Error handling TYPE command:", err.Error())
+				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+			case "XADD":
+				resp, err := r.HandleXAddCommand(args)
+				if err != nil {
+					log.Println("Error handling XADD command:", err.Error())
 				}
 				if err := r.Write(writer, resp); err != nil {
 					break

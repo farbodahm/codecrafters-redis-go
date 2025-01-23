@@ -12,6 +12,7 @@ type XRecord struct {
 type StreamsStorage interface {
 	XAdd(stream, id string, data map[string]string)
 	XRange(stream, start_id, end_id string) []XRecord
+	XGetStream(stream string) (*OrderedMap, bool)
 }
 
 // InMemoryOrderedMap is an in-memory implementation of the OrderedMap data structure.
@@ -38,4 +39,11 @@ func (storage *InMemoryOrderedMap) XRange(stream, start_id, end_id string) []XRe
 		return []XRecord{}
 	}
 	return storage.streams[stream].XRange(start_id, end_id)
+}
+
+func (storage *InMemoryOrderedMap) XGetStream(stream string) (*OrderedMap, bool) {
+	if _, ok := storage.streams[stream]; !ok {
+		return nil, false
+	}
+	return storage.streams[stream], true
 }
