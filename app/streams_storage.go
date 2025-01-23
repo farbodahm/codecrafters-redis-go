@@ -1,6 +1,6 @@
 package main
 
-var _ StreamsStorage = (*InMemoryOrderedMap)(nil)
+var _ StreamsStorage = (*InMemoryLinkedOrderedMap)(nil)
 
 // XRecord represents a record in Streams.
 type XRecord struct {
@@ -12,36 +12,36 @@ type XRecord struct {
 type StreamsStorage interface {
 	XAdd(stream, id string, data map[string]string)
 	XRange(stream, start_id, end_id string) []XRecord
-	XGetStream(stream string) (*OrderedMap, bool)
+	XGetStream(stream string) (OrderedMap, bool)
 }
 
-// InMemoryOrderedMap is an in-memory implementation of the OrderedMap data structure.
-type InMemoryOrderedMap struct {
-	streams map[string]*OrderedMap
+// InMemoryLinkedOrderedMap is an in-memory implementation of the LinkedOrderedMap data structure.
+type InMemoryLinkedOrderedMap struct {
+	streams map[string]*LinkedOrderedMap
 }
 
-func NewInMemoryOrderedMap() *InMemoryOrderedMap {
-	storage := &InMemoryOrderedMap{
-		streams: make(map[string]*OrderedMap),
+func NewInMemoryLinkedOrderedMap() *InMemoryLinkedOrderedMap {
+	storage := &InMemoryLinkedOrderedMap{
+		streams: make(map[string]*LinkedOrderedMap),
 	}
 	return storage
 }
 
-func (storage *InMemoryOrderedMap) XAdd(stream, id string, data map[string]string) {
+func (storage *InMemoryLinkedOrderedMap) XAdd(stream, id string, data map[string]string) {
 	if _, ok := storage.streams[stream]; !ok {
-		storage.streams[stream] = NewOrderedMap()
+		storage.streams[stream] = NewLinkedOrderedMap()
 	}
-	storage.streams[stream].XAdd(id, data)
+	storage.streams[stream].Add(id, data)
 }
 
-func (storage *InMemoryOrderedMap) XRange(stream, start_id, end_id string) []XRecord {
+func (storage *InMemoryLinkedOrderedMap) XRange(stream, start_id, end_id string) []XRecord {
 	if _, ok := storage.streams[stream]; !ok {
 		return []XRecord{}
 	}
-	return storage.streams[stream].XRange(start_id, end_id)
+	return storage.streams[stream].Range(start_id, end_id)
 }
 
-func (storage *InMemoryOrderedMap) XGetStream(stream string) (*OrderedMap, bool) {
+func (storage *InMemoryLinkedOrderedMap) XGetStream(stream string) (OrderedMap, bool) {
 	if _, ok := storage.streams[stream]; !ok {
 		return nil, false
 	}

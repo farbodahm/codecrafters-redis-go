@@ -1,12 +1,17 @@
 package main
 
-// OrderedMap is a data structure that maintains:
-// 1. Order of insertion
-// 2. Fast access to the nodes
-// 3. Fast range access
-// It's implemented using a doubly linked list and a map (LRU Cache).
-// Currently, it's used in Streams implementation to provide fast XRANGE and XREAD access.
-type OrderedMap struct {
+var _ OrderedMap = (*LinkedOrderedMap)(nil)
+
+// OrderedMap defines the behavior of a map that preserves insertion order
+// and allows range queries.
+type OrderedMap interface {
+	Add(id string, data map[string]string)
+	Range(startID, endID string) []XRecord
+}
+
+// LinkedOrderedMap is one specific implementation of the OrderedMap interface,
+// using a doubly linked list and a map under the hood.
+type LinkedOrderedMap struct {
 	Head *OMNode
 	Tail *OMNode
 
@@ -14,21 +19,21 @@ type OrderedMap struct {
 	Nodes map[string]*OMNode
 }
 
-// OMNode represents a node in the OrderedMap.
+// OMNode represents a node in the LinkedOrderedMap.
 type OMNode struct {
 	Prev  *OMNode
 	Next  *OMNode
 	Value XRecord
 }
 
-func NewOrderedMap() *OrderedMap {
-	return &OrderedMap{
+func NewLinkedOrderedMap() *LinkedOrderedMap {
+	return &LinkedOrderedMap{
 		Nodes: make(map[string]*OMNode),
 	}
 }
 
-// XAdd adds a new key-value pair to the OrderedMap.
-func (om *OrderedMap) XAdd(id string, data map[string]string) {
+// Add adds a new key-value pair to the LinkedOrderedMap.
+func (om *LinkedOrderedMap) Add(id string, data map[string]string) {
 	v := XRecord{
 		Id:   id,
 		Data: data,
@@ -49,8 +54,8 @@ func (om *OrderedMap) XAdd(id string, data map[string]string) {
 	om.Nodes[id] = node
 }
 
-// XRange returns a range of nodes from the OrderedMap starting from `start` key to `end` key.
-func (om *OrderedMap) XRange(start_id, end_id string) []XRecord {
+// Range returns a range of nodes from the LinkedOrderedMap starting from `start` key to `end` key.
+func (om *LinkedOrderedMap) Range(start_id, end_id string) []XRecord {
 	var nodes []XRecord
 
 	node := om.Nodes[start_id]
@@ -64,10 +69,4 @@ func (om *OrderedMap) XRange(start_id, end_id string) []XRecord {
 	}
 
 	return nodes
-}
-
-// XGet returns the node with the given key from the OrderedMap.
-func (om *OrderedMap) XGet(key string) (*OMNode, bool) {
-	v, exists := om.Nodes[key]
-	return v, exists
 }

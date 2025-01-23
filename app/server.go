@@ -726,7 +726,7 @@ func main() {
 	rdb_path := *rdbDir + "/" + *rdbFile
 	if _, err := os.Stat(rdb_path); errors.Is(err, os.ErrNotExist) {
 		log.Println("RDB file does not exist")
-		r = *NewRedis(config, NewInMemoryStorage(), NewInMemoryOrderedMap(), *replicaOf)
+		r = *NewRedis(config, NewInMemoryStorage(), NewInMemoryLinkedOrderedMap(), *replicaOf)
 	} else {
 		log.Println("RDB file exists")
 		rdb_parser := NewRDBParser(NewInMemoryStorage())
@@ -734,7 +734,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		r = *NewRedis(config, rdb_parser.Data, NewInMemoryOrderedMap(), *replicaOf)
+		r = *NewRedis(config, rdb_parser.Data, NewInMemoryLinkedOrderedMap(), *replicaOf)
 	}
 
 	r.Start()
