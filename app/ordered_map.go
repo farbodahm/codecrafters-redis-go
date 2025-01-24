@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var _ OrderedMap = (*LinkedOrderedMap)(nil)
@@ -71,21 +73,31 @@ func (om *LinkedOrderedMap) Add(id string, data map[string]string) (XRecord, err
 // verifyId verifies if the id is greater than the last id in the LinkedOrderedMap.
 // It returns the milisecondsTime and sequence number of the id.
 func (om *LinkedOrderedMap) verifyId(id string) (int64, int, error) {
-	s := strings.Split(id, "-")
-	milisecondsTime, err := strconv.ParseInt(s[0], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("error converting milisecondsTime to int: %w", err)
-	}
 
+	var milisecondsTime int64
 	var sequence int
-	if s[1] == "*" {
-		sequence = om.generateNextSequenceNumber(milisecondsTime)
+	var err error
+	if id == "*" {
+		milisecondsTime = time.Now().UnixMilli()
+		sequence = 0
 	} else {
-		sequence, err = strconv.Atoi(s[1])
+		s := strings.Split(id, "-")
+		milisecondsTime, err = strconv.ParseInt(s[0], 10, 64)
 		if err != nil {
-			return 0, 0, fmt.Errorf("error converting sequence to int: %w", err)
+			return 0, 0, fmt.Errorf("error converting milisecondsTime to int: %w", err)
+		}
+
+		if s[1] == "*" {
+			sequence = om.generateNextSequenceNumber(milisecondsTime)
+		} else {
+			sequence, err = strconv.Atoi(s[1])
+			if err != nil {
+				return 0, 0, fmt.Errorf("error converting sequence to int: %w", err)
+			}
 		}
 	}
+
+	log.Println("milisecondsTime", milisecondsTime, "sequence", sequence)
 
 	if milisecondsTime <= 0 && sequence <= 0 {
 		return 0, 0, fmt.Errorf("ERR The ID specified in XADD must be greater than 0-0")
