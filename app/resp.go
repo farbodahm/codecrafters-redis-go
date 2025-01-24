@@ -123,3 +123,15 @@ func EncodeRESPInteger(i int) []byte {
 func EncodeRESPError(s string) []byte {
 	return []byte("-" + s + RESPDelimiter)
 }
+
+// EncodeXRecordRESP encodes an XRecord into the RESP Array format.
+func EncodeXRecordsRESPArray(records []XRecord) []byte {
+	var buf bytes.Buffer
+	buf.WriteString("*" + strconv.Itoa(len(records)) + RESPDelimiter)
+	for _, record := range records {
+		buf.WriteString("*2" + RESPDelimiter)
+		buf.Write(EncodeRESPBulkString(record.Id))
+		buf.Write(EncodeRESPArray(MapToArray(record.Data)))
+	}
+	return buf.Bytes()
+}

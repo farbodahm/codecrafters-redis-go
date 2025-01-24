@@ -27,3 +27,12 @@ func ReadRDB(path string) ([]byte, error) {
 
 	return bytes, nil
 }
+
+// MapToArray converts a map to an array of strings.
+func MapToArray(m map[string]string) []string {
+	var arr []string
+	for k, v := range m {
+		arr = append(arr, k, v)
+	}
+	return arr
+}

@@ -317,6 +317,20 @@ func (r *Redis) HandleXAddCommand(args []string) ([]byte, error) {
 	return EncodeRESPBulkString(node.Id), nil
 }
 
+// HandleXRangeCommand returns the records in the given range.
+func (r *Redis) HandleXRangeCommand(args []string) ([]byte, error) {
+	if len(args) < 4 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+	streamName := args[1]
+	startId := args[2]
+	endId := args[3]
+
+	records := r.ss.XRange(streamName, startId, endId)
+
+	return EncodeXRecordsRESPArray(records), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -346,7 +360,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 			log.Println("Command ready:", args)
 
 			// TODO: Implement the actual command handling. Probably need another state machine here.
-			switch args[0] {
+			switch strings.ToUpper(args[0]) {
 			case "PING":
 				log.Println("Responding with PONG")
 				if err := r.Write(writer, EncodeRESPSimpleString("PONG")); err != nil {
@@ -436,6 +450,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				resp, err := r.HandleXAddCommand(args)
 				if err != nil {
 					log.Println("Error handling XADD command:", err.Error())
+				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+			case "XRANGE":
+				resp, err := r.HandleXRangeCommand(args)
+				if err != nil {
+					log.Println("Error handling XRANGE command:", err.Error())
 				}
 				if err := r.Write(writer, resp); err != nil {
 					break
