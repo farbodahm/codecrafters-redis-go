@@ -12,7 +12,7 @@ type XRecord struct {
 
 // StreamsStorage is an interface for storing and retrieving streams of data.
 type StreamsStorage interface {
-	XAdd(stream, id string, data map[string]string) error
+	XAdd(stream, id string, data map[string]string) (XRecord, error)
 	XRange(stream, start_id, end_id string) []XRecord
 	XGetStream(stream string) (OrderedMap, bool)
 }
@@ -29,7 +29,7 @@ func NewInMemoryLinkedOrderedMap() *InMemoryLinkedOrderedMap {
 	return storage
 }
 
-func (storage *InMemoryLinkedOrderedMap) XAdd(stream, id string, data map[string]string) error {
+func (storage *InMemoryLinkedOrderedMap) XAdd(stream, id string, data map[string]string) (XRecord, error) {
 	if _, ok := storage.streams[stream]; !ok {
 		storage.streams[stream] = NewLinkedOrderedMap()
 	}

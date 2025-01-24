@@ -309,11 +309,12 @@ func (r *Redis) HandleXAddCommand(args []string) ([]byte, error) {
 		records[args[i]] = args[i+1]
 	}
 
-	if err := r.ss.XAdd(streamName, recordId, records); err != nil {
+	node, err := r.ss.XAdd(streamName, recordId, records)
+	if err != nil {
 		return EncodeRESPError(err.Error()), nil
 	}
 
-	return EncodeRESPBulkString(recordId), nil
+	return EncodeRESPBulkString(node.Id), nil
 }
 
 // handleConnection handles a new connection to the Redis server.

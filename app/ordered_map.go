@@ -11,7 +11,7 @@ var _ OrderedMap = (*LinkedOrderedMap)(nil)
 // OrderedMap defines the behavior of a map that preserves insertion order
 // and allows range queries.
 type OrderedMap interface {
-	Add(id string, data map[string]string) error
+	Add(id string, data map[string]string) (XRecord, error)
 	Range(startID, endID string) []XRecord
 }
 
@@ -39,14 +39,14 @@ func NewLinkedOrderedMap() *LinkedOrderedMap {
 }
 
 // Add adds a new key-value pair to the LinkedOrderedMap.
-func (om *LinkedOrderedMap) Add(id string, data map[string]string) error {
+func (om *LinkedOrderedMap) Add(id string, data map[string]string) (XRecord, error) {
 	milisecondsTime, sequence, err := om.verifyId(id)
 	if err != nil {
-		return err
+		return XRecord{}, err
 	}
 
 	v := XRecord{
-		Id:               id,
+		Id:               fmt.Sprintf("%d-%d", milisecondsTime, sequence),
 		MillisecondsTime: milisecondsTime,
 		SequenceNumber:   sequence,
 		Data:             data,
@@ -65,7 +65,7 @@ func (om *LinkedOrderedMap) Add(id string, data map[string]string) error {
 	}
 
 	om.Nodes[id] = node
-	return nil
+	return v, nil
 }
 
 // verifyId verifies if the id is greater than the last id in the LinkedOrderedMap.
@@ -76,9 +76,15 @@ func (om *LinkedOrderedMap) verifyId(id string) (int64, int, error) {
 	if err != nil {
 		return 0, 0, fmt.Errorf("error converting milisecondsTime to int: %w", err)
 	}
-	sequence, err := strconv.Atoi(s[1])
-	if err != nil {
-		return 0, 0, fmt.Errorf("error converting sequence to int: %w", err)
+
+	var sequence int
+	if s[1] == "*" {
+		sequence = om.generateNextSequenceNumber(milisecondsTime)
+	} else {
+		sequence, err = strconv.Atoi(s[1])
+		if err != nil {
+			return 0, 0, fmt.Errorf("error converting sequence to int: %w", err)
+		}
 	}
 
 	if milisecondsTime <= 0 && sequence <= 0 {
@@ -95,6 +101,19 @@ func (om *LinkedOrderedMap) verifyId(id string) (int64, int, error) {
 	}
 
 	return milisecondsTime, sequence, nil
+}
+
+// generateNextSequenceNumber generates the next sequence number for the LinkedOrderedMap.
+func (om *LinkedOrderedMap) generateNextSequenceNumber(milisecondsTime int64) int {
+	if om.Tail == nil || milisecondsTime == 0 {
+		return 1
+	}
+
+	if om.Tail.Value.MillisecondsTime == milisecondsTime {
+		return om.Tail.Value.SequenceNumber + 1
+	}
+
+	return 0
 }
 
 // Range returns a range of nodes from the LinkedOrderedMap starting from `start` key to `end` key.
