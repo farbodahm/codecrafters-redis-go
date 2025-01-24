@@ -132,7 +132,13 @@ func (om *LinkedOrderedMap) generateNextSequenceNumber(milisecondsTime int64) in
 func (om *LinkedOrderedMap) Range(start_id, end_id string) []XRecord {
 	var nodes []XRecord
 
-	node := om.Nodes[start_id]
+	var node *OMNode
+	if start_id == "-" {
+		node = om.Head
+	} else {
+		node = om.Nodes[start_id]
+	}
+
 	for node != nil {
 		nodes = append(nodes, node.Value)
 		node = node.Next
