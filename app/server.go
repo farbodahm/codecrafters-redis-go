@@ -331,6 +331,26 @@ func (r *Redis) HandleXRangeCommand(args []string) ([]byte, error) {
 	return EncodeXRecordsRESPArray(records), nil
 }
 
+// HandleXReadCommand returns the records starting from the given id (exclusive) to the latest record.
+func (r *Redis) HandleXReadCommand(args []string) ([]byte, error) {
+	if len(args) < 4 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	streamName := args[2]
+	startId := args[3]
+
+	records := r.ss.XRead(streamName, startId)
+
+	var buf bytes.Buffer
+	buf.WriteString("*1" + RESPDelimiter)
+	buf.WriteString("*2" + RESPDelimiter)
+	buf.Write(EncodeRESPBulkString(streamName))
+	buf.Write(EncodeXRecordsRESPArray(records))
+
+	return buf.Bytes(), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -462,6 +482,15 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err := r.Write(writer, resp); err != nil {
 					break
 				}
+			case "XREAD":
+				resp, err := r.HandleXReadCommand(args)
+				if err != nil {
+					log.Println("Error handling XREAD command:", err.Error())
+				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+
 			default:
 				log.Println("Unknown command:", args[0])
 			}

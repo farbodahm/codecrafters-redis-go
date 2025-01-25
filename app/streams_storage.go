@@ -15,6 +15,7 @@ type StreamsStorage interface {
 	XAdd(stream, id string, data map[string]string) (XRecord, error)
 	XRange(stream, start_id, end_id string) []XRecord
 	XGetStream(stream string) (OrderedMap, bool)
+	XRead(stream string, id string) []XRecord
 }
 
 // InMemoryLinkedOrderedMap is an in-memory implementation of the LinkedOrderedMap data structure.
@@ -48,4 +49,11 @@ func (storage *InMemoryLinkedOrderedMap) XGetStream(stream string) (OrderedMap, 
 		return nil, false
 	}
 	return storage.streams[stream], true
+}
+
+func (storage *InMemoryLinkedOrderedMap) XRead(stream string, id string) []XRecord {
+	if _, ok := storage.streams[stream]; !ok {
+		return []XRecord{}
+	}
+	return storage.streams[stream].Read(id)
 }

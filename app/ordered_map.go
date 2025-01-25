@@ -15,6 +15,7 @@ var _ OrderedMap = (*LinkedOrderedMap)(nil)
 type OrderedMap interface {
 	Add(id string, data map[string]string) (XRecord, error)
 	Range(startID, endID string) []XRecord
+	Read(startID string) []XRecord
 }
 
 // LinkedOrderedMap is one specific implementation of the OrderedMap interface,
@@ -146,6 +147,29 @@ func (om *LinkedOrderedMap) Range(start_id, end_id string) []XRecord {
 			nodes = append(nodes, node.Value)
 			break
 		}
+	}
+
+	return nodes
+}
+
+// Read returns a range of nodes from the LinkedOrderedMap starting from `start` (exclusive) key to last key.
+func (om *LinkedOrderedMap) Read(start_id string) []XRecord {
+	var nodes []XRecord
+	var node *OMNode
+
+	if start_id == "0-0" {
+		node = om.Head
+	} else {
+		node, ok := om.Nodes[start_id]
+		if !ok {
+			return nodes
+		}
+		node = node.Next
+	}
+
+	for node != nil {
+		nodes = append(nodes, node.Value)
+		node = node.Next
 	}
 
 	return nodes
