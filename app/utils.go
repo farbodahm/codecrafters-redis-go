@@ -36,3 +36,15 @@ func MapToArray(m map[string]string) []string {
 	}
 	return arr
 }
+
+// EmptyChannel will drain the channel and make it empty.
+func EmptyChannel[T any](ch chan T) {
+L:
+	for {
+		select {
+		case <-ch:
+		default:
+			break L
+		}
+	}
+}

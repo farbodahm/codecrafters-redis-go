@@ -162,6 +162,12 @@ func (om *LinkedOrderedMap) Read(start_id string) []XRecord {
 		node = node.Next
 	} else {
 		node = om.Head
+		s := strings.Split(start_id, "-")
+		milisecondsTime, _ := strconv.ParseInt(s[0], 10, 64)
+		sequence, _ := strconv.Atoi(s[1])
+		for node != nil && (node.Value.MillisecondsTime < milisecondsTime || (node.Value.MillisecondsTime == milisecondsTime && node.Value.SequenceNumber <= sequence)) {
+			node = node.Next
+		}
 	}
 
 	for node != nil {
