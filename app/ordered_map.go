@@ -157,14 +157,11 @@ func (om *LinkedOrderedMap) Read(start_id string) []XRecord {
 	var nodes []XRecord
 	var node *OMNode
 
-	if start_id == "0-0" {
-		node = om.Head
-	} else {
-		node, ok := om.Nodes[start_id]
-		if !ok {
-			return nodes
-		}
+	node, ok := om.Nodes[start_id]
+	if ok {
 		node = node.Next
+	} else {
+		node = om.Head
 	}
 
 	for node != nil {

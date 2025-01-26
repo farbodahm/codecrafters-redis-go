@@ -337,16 +337,21 @@ func (r *Redis) HandleXReadCommand(args []string) ([]byte, error) {
 		return EncodeRESPBulkString(""), ErrInvalidCommand
 	}
 
-	streamName := args[2]
-	startId := args[3]
-
-	records := r.ss.XRead(streamName, startId)
+	streamNames := args[2:]
+	numStreams := len(streamNames) / 2
 
 	var buf bytes.Buffer
-	buf.WriteString("*1" + RESPDelimiter)
-	buf.WriteString("*2" + RESPDelimiter)
-	buf.Write(EncodeRESPBulkString(streamName))
-	buf.Write(EncodeXRecordsRESPArray(records))
+	buf.WriteString(fmt.Sprintf("*%d%s", numStreams, RESPDelimiter))
+
+	for i := 0; i < numStreams; i++ {
+		streamName := streamNames[i]
+		startId := streamNames[i+numStreams]
+		records := r.ss.XRead(streamName, startId)
+
+		buf.WriteString("*2" + RESPDelimiter)
+		buf.Write(EncodeRESPBulkString(streamName))
+		buf.Write(EncodeXRecordsRESPArray(records))
+	}
 
 	return buf.Bytes(), nil
 }
