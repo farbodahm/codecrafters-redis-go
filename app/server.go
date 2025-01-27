@@ -344,50 +344,61 @@ func (r *Redis) HandleXReadCommand(args []string) ([]byte, error) {
 	// Empty the channel before starting a new XREAD
 	EmptyChannel(r.newXAddRecordChan)
 
-	var streamNames []string
-	var blockMs int
-	if args[1] == "block" {
-		streamNames = args[4:]
-		blockMs, _ = strconv.Atoi(args[2])
-	} else {
-		streamNames = args[2:]
-	}
-	numStreams := len(streamNames) / 2
-	// Map stream name to its start id
-	streamToId := make(map[string]string)
-	for i := 0; i < numStreams; i++ {
-		streamName := streamNames[i]
-		startId := streamNames[i+numStreams]
-		streamToId[streamName] = startId
+	blockMs, streamToID, err := parseXReadArgs(args)
+	if err != nil {
+		return EncodeRESPBulkString(""), err
 	}
 
-	var buf bytes.Buffer
-	buf.WriteString(fmt.Sprintf("*%d%s", numStreams, RESPDelimiter))
-	for streamName, startId := range streamToId {
-		records := r.ss.XRead(streamName, startId)
-
-		buf.WriteString("*2" + RESPDelimiter)
-		buf.Write(EncodeRESPBulkString(streamName))
-		buf.Write(EncodeXRecordsRESPArray(records))
+	initialResp, err := r.buildXReadResponse(streamToID)
+	if err != nil {
+		return EncodeRESPBulkString(""), err
 	}
+
 	if blockMs == 0 {
-		return buf.Bytes(), nil
+		return initialResp, nil
 	}
 
-	// Block until new records are added to the stream
-	select {
-	case streamName := <-r.newXAddRecordChan:
-		records := r.ss.XRead(streamName, streamToId[streamName])
-		buf.Reset()
-		buf.WriteString(fmt.Sprintf("*1%s", RESPDelimiter))
+	// Block until new records are added or we timeout
+	return r.waitForNewXAdd(streamToID, blockMs)
+}
+
+// buildXReadResponse constructs the RESP array containing records for each stream.
+func (r *Redis) buildXReadResponse(streamToID map[string]string) ([]byte, error) {
+	var buf bytes.Buffer
+	// Number of streams in response
+	buf.WriteString(fmt.Sprintf("*%d%s", len(streamToID), RESPDelimiter))
+
+	for streamName, startID := range streamToID {
+		records := r.ss.XRead(streamName, startID)
+
+		// For each stream, write an array with 2 elements: [stream name, records]
 		buf.WriteString("*2" + RESPDelimiter)
 		buf.Write(EncodeRESPBulkString(streamName))
 		buf.Write(EncodeXRecordsRESPArray(records))
-	case <-time.After(time.Duration(blockMs) * time.Millisecond):
-		return EncodeRESPBulkString(""), nil
 	}
 
 	return buf.Bytes(), nil
+}
+
+// waitForNewXAdd blocks until a new XADD occurs or until blockMs elapses.
+func (r *Redis) waitForNewXAdd(streamToID map[string]string, blockMs int) ([]byte, error) {
+	var buf bytes.Buffer
+
+	select {
+	case updatedStream := <-r.newXAddRecordChan:
+		// A new XADD arrived for 'updatedStream'
+		records := r.ss.XRead(updatedStream, streamToID[updatedStream])
+
+		buf.WriteString(fmt.Sprintf("*1%s", RESPDelimiter))
+		buf.WriteString("*2" + RESPDelimiter)
+		buf.Write(EncodeRESPBulkString(updatedStream))
+		buf.Write(EncodeXRecordsRESPArray(records))
+
+		return buf.Bytes(), nil
+
+	case <-time.After(time.Duration(blockMs) * time.Millisecond):
+		return EncodeRESPBulkString(""), nil
+	}
 }
 
 // handleConnection handles a new connection to the Redis server.
