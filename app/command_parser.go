@@ -13,7 +13,7 @@ import (
 //	XREAD STREAMS <stream1> <stream2> ... <id1> <id2> ...
 func parseXReadArgs(args []string) (int, map[string]string, error) {
 	// By default, no blocking
-	blockMs := 0
+	blockMs := -1
 	var streamNames []string
 
 	// Check if second argument is "BLOCK"

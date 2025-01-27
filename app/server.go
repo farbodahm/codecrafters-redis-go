@@ -354,12 +354,16 @@ func (r *Redis) HandleXReadCommand(args []string) ([]byte, error) {
 		return EncodeRESPBulkString(""), err
 	}
 
-	if blockMs == 0 {
+	if blockMs == -1 {
 		return initialResp, nil
 	}
 
+	if blockMs == 0 {
+		return r.waitForNewXadd(streamToID)
+	}
+
 	// Block until new records are added or we timeout
-	return r.waitForNewXAdd(streamToID, blockMs)
+	return r.waitForNewXAddWithTimeOut(streamToID, blockMs)
 }
 
 // buildXReadResponse constructs the RESP array containing records for each stream.
@@ -380,8 +384,23 @@ func (r *Redis) buildXReadResponse(streamToID map[string]string) ([]byte, error)
 	return buf.Bytes(), nil
 }
 
-// waitForNewXAdd blocks until a new XADD occurs or until blockMs elapses.
-func (r *Redis) waitForNewXAdd(streamToID map[string]string, blockMs int) ([]byte, error) {
+// waitForNewXadd blocks until a new XADD occurs
+func (r *Redis) waitForNewXadd(streamToID map[string]string) ([]byte, error) {
+	var buf bytes.Buffer
+	updatedStream := <-r.newXAddRecordChan
+	// A new XADD arrived for 'updatedStream'
+	records := r.ss.XRead(updatedStream, streamToID[updatedStream])
+
+	buf.WriteString(fmt.Sprintf("*1%s", RESPDelimiter))
+	buf.WriteString("*2" + RESPDelimiter)
+	buf.Write(EncodeRESPBulkString(updatedStream))
+	buf.Write(EncodeXRecordsRESPArray(records))
+
+	return buf.Bytes(), nil
+}
+
+// waitForNewXAddWithTimeOut blocks until a new XADD occurs or until blockMs elapses.
+func (r *Redis) waitForNewXAddWithTimeOut(streamToID map[string]string, blockMs int) ([]byte, error) {
 	var buf bytes.Buffer
 
 	select {
