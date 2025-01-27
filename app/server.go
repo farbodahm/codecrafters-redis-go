@@ -357,11 +357,9 @@ func (r *Redis) HandleXReadCommand(args []string) ([]byte, error) {
 	if blockMs == -1 {
 		return initialResp, nil
 	}
-
 	if blockMs == 0 {
 		return r.waitForNewXadd(streamToID)
 	}
-
 	// Block until new records are added or we timeout
 	return r.waitForNewXAddWithTimeOut(streamToID, blockMs)
 }
