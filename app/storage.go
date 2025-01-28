@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -16,6 +17,7 @@ type Storage interface {
 	Set(key, value string) error
 	SetWithTTL(key, value string, ttl int64) error
 	Keys() ([]string, error)
+	Increment(key string) (int, error)
 }
 
 // InMemoryStorage is an in-memory implementation of the Storage interface.
@@ -87,4 +89,26 @@ func (s *InMemoryStorage) Keys() ([]string, error) {
 	}
 
 	return keys, nil
+}
+
+// Increment increments the value of a key in the in-memory storage.
+func (s *InMemoryStorage) Increment(key string) (int, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	v, ok := s.data[key]
+	if !ok {
+		return 0, ErrKeyNotFound
+	}
+
+	// TODO: After using the correct data type, remove this conversion.
+	i, err := strconv.Atoi(v.Value)
+	if err != nil {
+		return -1, err
+	}
+
+	v.Value = strconv.Itoa(i + 1)
+	s.data[key] = v
+
+	return i + 1, nil
 }

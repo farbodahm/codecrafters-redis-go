@@ -418,6 +418,20 @@ func (r *Redis) waitForNewXAddWithTimeOut(streamToID map[string]string, blockMs 
 	}
 }
 
+// HandleINCR increments the value of the given key by 1.
+func (r *Redis) HandleINCR(args []string) ([]byte, error) {
+	if len(args) != 2 {
+		return EncodeRESPBulkString(""), ErrInvalidCommand
+	}
+
+	i, err := r.storage.Increment(args[1])
+	if err != nil {
+		return EncodeRESPBulkString(""), err
+	}
+
+	return EncodeRESPInteger(i), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -557,7 +571,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err := r.Write(writer, resp); err != nil {
 					break
 				}
-
+			case "INCR":
+				resp, err := r.HandleINCR(args)
+				if err != nil {
+					log.Println("Error handling INCR command:", err.Error())
+				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
 			default:
 				log.Println("Unknown command:", args[0])
 			}
