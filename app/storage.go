@@ -98,7 +98,8 @@ func (s *InMemoryStorage) Increment(key string) (int, error) {
 
 	v, ok := s.data[key]
 	if !ok {
-		return 0, ErrKeyNotFound
+		s.data[key] = InMemoryStorageValue{Value: "1"}
+		return 1, nil
 	}
 
 	// TODO: After using the correct data type, remove this conversion.
