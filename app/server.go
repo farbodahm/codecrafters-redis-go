@@ -426,7 +426,7 @@ func (r *Redis) HandleINCR(args []string) ([]byte, error) {
 
 	i, err := r.storage.Increment(args[1])
 	if err != nil {
-		return EncodeRESPBulkString(""), err
+		return EncodeRESPError("ERR value is not an integer or out of range"), nil
 	}
 
 	return EncodeRESPInteger(i), nil
