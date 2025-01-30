@@ -434,6 +434,15 @@ func (r *Redis) HandleINCR(args []string) ([]byte, error) {
 	return EncodeRESPInteger(i), nil
 }
 
+// HanfleEXECCommand executes the transaction.
+func (r *Redis) HandleEXECCommand(commands []Command) ([]byte, error) {
+	if commands == nil {
+		return EncodeRESPError("ERR EXEC without MULTI"), nil
+	}
+
+	return EncodeRESPSimpleString("OK"), nil
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -442,7 +451,7 @@ func (r *Redis) handleConnection(c net.Conn) {
 	writer := bufio.NewWriter(c)
 	parser := RESPParser{}
 	isTransaction := false
-	transactionBuffer := make([]Command, 0)
+	var transactionBuffer []Command
 
 	for {
 		buf, err := reader.ReadBytes('\n')
@@ -592,6 +601,15 @@ func (r *Redis) handleConnection(c net.Conn) {
 			case "MULTI":
 				isTransaction = true
 				resp := EncodeRESPSimpleString("OK")
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+			case "EXEC":
+				isTransaction = false
+				resp, err := r.HandleEXECCommand(transactionBuffer)
+				if err != nil {
+					log.Println("Error handling EXEC command:", err.Error())
+				}
 				if err := r.Write(writer, resp); err != nil {
 					break
 				}
