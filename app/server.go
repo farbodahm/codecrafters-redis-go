@@ -481,9 +481,13 @@ func (r *Redis) handleConnection(c net.Conn) {
 			log.Println("Command ready:", args)
 
 			// If MULTI is called, buffer the commands until EXEC is called
-			if transactionBuffer != nil && (args[0] == "SET" || args[0] == "INCR") {
-				// TODO: reply ok
+			if transactionBuffer != nil && args[0] != "EXEC" {
 				transactionBuffer = append(transactionBuffer, args)
+				resp := EncodeRESPSimpleString("QUEUED")
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+				continue
 			}
 
 			// TODO: Implement the actual command handling. Probably need another state machine here.
