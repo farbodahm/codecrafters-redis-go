@@ -440,6 +440,13 @@ func (r *Redis) HandleEXECCommand(commands []Command) ([]byte, error) {
 		return EncodeRESPError("ERR EXEC without MULTI"), nil
 	}
 
+	if len(commands) == 0 {
+		log.Println("No commands to execute")
+		return EncodeRESPArray([]string{}), nil
+	}
+
+	log.Println("len commands", len(commands))
+
 	return EncodeRESPSimpleString("OK"), nil
 }
 
@@ -450,7 +457,6 @@ func (r *Redis) handleConnection(c net.Conn) {
 	reader := bufio.NewReader(c)
 	writer := bufio.NewWriter(c)
 	parser := RESPParser{}
-	isTransaction := false
 	var transactionBuffer []Command
 
 	for {
@@ -474,7 +480,8 @@ func (r *Redis) handleConnection(c net.Conn) {
 		if ready {
 			log.Println("Command ready:", args)
 
-			if isTransaction {
+			// If MULTI is called, buffer the commands until EXEC is called
+			if transactionBuffer != nil && (args[0] == "SET" || args[0] == "INCR") {
 				// TODO: reply ok
 				transactionBuffer = append(transactionBuffer, args)
 			}
@@ -599,14 +606,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 					break
 				}
 			case "MULTI":
-				isTransaction = true
+				transactionBuffer = make([]Command, 0)
 				resp := EncodeRESPSimpleString("OK")
 				if err := r.Write(writer, resp); err != nil {
 					break
 				}
 			case "EXEC":
-				isTransaction = false
 				resp, err := r.HandleEXECCommand(transactionBuffer)
+				transactionBuffer = nil
 				if err != nil {
 					log.Println("Error handling EXEC command:", err.Error())
 				}
