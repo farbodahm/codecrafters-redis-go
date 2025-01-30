@@ -64,6 +64,8 @@ type Slave struct {
 	rw        *bufio.ReadWriter
 }
 
+type Command []string
+
 func NewRedis(config Config, storage Storage, ss StreamsStorage, replicaOf string) *Redis {
 	var rconfig ReplicationConfig
 	if replicaOf == "" {
@@ -439,6 +441,8 @@ func (r *Redis) handleConnection(c net.Conn) {
 	reader := bufio.NewReader(c)
 	writer := bufio.NewWriter(c)
 	parser := RESPParser{}
+	isTransaction := false
+	transactionBuffer := make([]Command, 0)
 
 	for {
 		buf, err := reader.ReadBytes('\n')
@@ -457,8 +461,14 @@ func (r *Redis) handleConnection(c net.Conn) {
 			log.Println("Error parsing:", err.Error())
 			break
 		}
+
 		if ready {
 			log.Println("Command ready:", args)
+
+			if isTransaction {
+				// TODO: reply ok
+				transactionBuffer = append(transactionBuffer, args)
+			}
 
 			// TODO: Implement the actual command handling. Probably need another state machine here.
 			switch strings.ToUpper(args[0]) {
@@ -576,6 +586,12 @@ func (r *Redis) handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Error handling INCR command:", err.Error())
 				}
+				if err := r.Write(writer, resp); err != nil {
+					break
+				}
+			case "MULTI":
+				isTransaction = true
+				resp := EncodeRESPSimpleString("OK")
 				if err := r.Write(writer, resp); err != nil {
 					break
 				}
