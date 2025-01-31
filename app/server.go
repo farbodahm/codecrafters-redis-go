@@ -450,6 +450,130 @@ func (r *Redis) HandleEXECCommand(commands []Command) ([]byte, error) {
 	return EncodeRESPSimpleString("OK"), nil
 }
 
+// RunCommand runs the given command and returns the response.
+func (r *Redis) RunCommand(c Command, txBuffer *[]Command, conn net.Conn, br *bufio.Reader, bw *bufio.Writer) ([]byte, error) {
+	switch strings.ToUpper(c[0]) {
+	case "PING":
+		log.Println("Responding with PONG")
+		return EncodeRESPSimpleString("PONG"), nil
+
+	case "ECHO":
+		log.Println("Responding with ECHO")
+		return EncodeRESPBulkString(c[1]), nil
+
+	case "SET":
+		err := r.HandleSetCommand(c)
+		if err != nil {
+			log.Println("Error setting value:", err.Error())
+			return EncodeRESPError(err.Error()), err
+		}
+		return EncodeRESPSimpleString("OK"), nil
+
+	case "GET":
+		resp, err := r.storage.Get(c[1])
+		if err != nil && err != ErrKeyNotFound {
+			log.Println("Error getting value:", err.Error())
+			break
+		}
+		return EncodeRESPBulkString(resp), nil
+
+	case "CONFIG":
+		resp, err := r.HandleConfigCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling CONFIG command: %w", err)
+		}
+		return resp, nil
+
+	case "KEYS":
+		resp, err := r.HandleKeysCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling KEYS command: %w", err)
+		}
+		return resp, nil
+
+	case "INFO":
+		resp, err := r.HandleInfoCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling INFO command: %w", err)
+		}
+		return resp, nil
+
+	case "REPLCONF":
+		resp, err := r.HandleReplconfCommand(r.slaves[conn.RemoteAddr().String()], c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling REPLCONF command: %w", err)
+		}
+		return resp, nil
+
+	case "PSYNC":
+		resp, err := r.HandlePsyncCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling PSYNC command: %w", err)
+		}
+		r.slaves[conn.RemoteAddr().String()] = &Slave{id: conn.RemoteAddr().String(), rw: bufio.NewReadWriter(br, bw)}
+		return resp, nil
+
+	case "WAIT":
+		resp, err := r.HandleWaitCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling WAIT command: %w", err)
+		}
+		return resp, nil
+
+	case "TYPE":
+		resp, err := r.HandleTypeCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling TYPE command: %w", err)
+		}
+		return resp, nil
+
+	case "XADD":
+		resp, err := r.HandleXAddCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling XADD command: %w", err)
+		}
+		return resp, nil
+
+	case "XRANGE":
+		resp, err := r.HandleXRangeCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling XRANGE command: %w", err)
+		}
+		return resp, nil
+
+	case "XREAD":
+		resp, err := r.HandleXReadCommand(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling XREAD command: %w", err)
+		}
+		return resp, nil
+
+	case "INCR":
+		resp, err := r.HandleINCR(c)
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling INCR command: %w", err)
+		}
+		return resp, nil
+
+	case "MULTI":
+		txBuffer = &[]Command{}
+		return EncodeRESPSimpleString("OK"), nil
+
+	case "EXEC":
+		resp, err := r.HandleEXECCommand(*txBuffer)
+		txBuffer = nil
+		if err != nil {
+			return EncodeRESPError(err.Error()), fmt.Errorf("error handling EXEC command: %w", err)
+		}
+		return resp, nil
+
+	default:
+		log.Println("Unknown command:", c[0])
+	}
+
+	return EncodeRESPError("ERR unknown command"), fmt.Errorf("unknown command: %s", c[0])
+}
+
 // handleConnection handles a new connection to the Redis server.
 func (r *Redis) handleConnection(c net.Conn) {
 	defer c.Close()
@@ -490,142 +614,13 @@ func (r *Redis) handleConnection(c net.Conn) {
 				continue
 			}
 
-			// TODO: Implement the actual command handling. Probably need another state machine here.
-			switch strings.ToUpper(args[0]) {
-			case "PING":
-				log.Println("Responding with PONG")
-				if err := r.Write(writer, EncodeRESPSimpleString("PONG")); err != nil {
-					break
-				}
-			case "ECHO":
-				log.Println("Responding with ECHO")
-				if err := r.Write(writer, EncodeRESPBulkString(args[1])); err != nil {
-					break
-				}
-			case "SET":
-				err := r.HandleSetCommand(args)
-				if err != nil {
-					log.Println("Error setting value:", err.Error())
-				}
-				if err := r.Write(writer, EncodeRESPSimpleString("OK")); err != nil {
-					break
-				}
-			case "GET":
-				resp, err := r.storage.Get(args[1])
-				if err != nil && err != ErrKeyNotFound {
-					log.Println("Error getting value:", err.Error())
-					break
-				}
-				if err := r.Write(writer, EncodeRESPBulkString(resp)); err != nil {
-					break
-				}
-
-			case "CONFIG":
-				resp, err := r.HandleConfigCommand(args)
-				if err != nil {
-					log.Println("Error handling CONFIG command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "KEYS":
-				resp, err := r.HandleKeysCommand(args)
-				if err != nil {
-					log.Println("Error handling KEYS command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "INFO":
-				resp, err := r.HandleInfoCommand(args)
-				if err != nil {
-					log.Println("Error handling INFO command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "REPLCONF":
-				resp, err := r.HandleReplconfCommand(r.slaves[c.RemoteAddr().String()], args)
-				if err != nil {
-					log.Println("Error handling REPLCONF command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "PSYNC":
-				resp, err := r.HandlePsyncCommand(args)
-				if err != nil {
-					log.Println("Error handling PSYNC command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-				r.slaves[c.RemoteAddr().String()] = &Slave{id: c.RemoteAddr().String(), rw: bufio.NewReadWriter(reader, writer)}
-			case "WAIT":
-				resp, err := r.HandleWaitCommand(args)
-				if err != nil {
-					log.Println("Error handling WAIT command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "TYPE":
-				resp, err := r.HandleTypeCommand(args)
-				if err != nil {
-					log.Println("Error handling TYPE command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "XADD":
-				resp, err := r.HandleXAddCommand(args)
-				if err != nil {
-					log.Println("Error handling XADD command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "XRANGE":
-				resp, err := r.HandleXRangeCommand(args)
-				if err != nil {
-					log.Println("Error handling XRANGE command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "XREAD":
-				resp, err := r.HandleXReadCommand(args)
-				if err != nil {
-					log.Println("Error handling XREAD command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "INCR":
-				resp, err := r.HandleINCR(args)
-				if err != nil {
-					log.Println("Error handling INCR command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "MULTI":
-				transactionBuffer = make([]Command, 0)
-				resp := EncodeRESPSimpleString("OK")
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			case "EXEC":
-				resp, err := r.HandleEXECCommand(transactionBuffer)
-				transactionBuffer = nil
-				if err != nil {
-					log.Println("Error handling EXEC command:", err.Error())
-				}
-				if err := r.Write(writer, resp); err != nil {
-					break
-				}
-			default:
-				log.Println("Unknown command:", args[0])
+			buf, err := r.RunCommand(args, &transactionBuffer, c, reader, writer)
+			if err != nil {
+				log.Println("Error running command:", err.Error())
+			}
+			if err := r.Write(writer, buf); err != nil {
+				log.Println("Error writing response:", err.Error())
+				break
 			}
 		}
 	}
