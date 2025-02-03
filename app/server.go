@@ -445,13 +445,24 @@ func (r *Redis) HandleEXECCommand(commands []Command) ([]byte, error) {
 		return EncodeRESPArray([]string{}), nil
 	}
 
-	log.Println("len commands", len(commands))
+	log.Println("Executing transaction with", len(commands), "commands")
+	responses := make([][]byte, 0)
+	for _, c := range commands {
+		log.Println("Executing command", c)
+		resp, err := r.RunCommand(c, nil, nil, nil)
+		// TODO: Handle error
+		if err != nil {
+			log.Println("Error executing TX command:", err.Error())
+			return EncodeRESPError(err.Error()), err
+		}
+		responses = append(responses, resp)
+	}
 
-	return EncodeRESPSimpleString("OK"), nil
+	return EncodeRESPArrayStringEncoded(responses), nil
 }
 
 // RunCommand runs the given command and returns the response.
-func (r *Redis) RunCommand(c Command, txBuffer *[]Command, conn net.Conn, br *bufio.Reader, bw *bufio.Writer) ([]byte, error) {
+func (r *Redis) RunCommand(c Command, conn net.Conn, br *bufio.Reader, bw *bufio.Writer) ([]byte, error) {
 	switch strings.ToUpper(c[0]) {
 	case "PING":
 		log.Println("Responding with PONG")
@@ -555,18 +566,6 @@ func (r *Redis) RunCommand(c Command, txBuffer *[]Command, conn net.Conn, br *bu
 		}
 		return resp, nil
 
-	case "MULTI":
-		txBuffer = &[]Command{}
-		return EncodeRESPSimpleString("OK"), nil
-
-	case "EXEC":
-		resp, err := r.HandleEXECCommand(*txBuffer)
-		txBuffer = nil
-		if err != nil {
-			return EncodeRESPError(err.Error()), fmt.Errorf("error handling EXEC command: %w", err)
-		}
-		return resp, nil
-
 	default:
 		log.Println("Unknown command:", c[0])
 	}
@@ -604,23 +603,41 @@ func (r *Redis) handleConnection(c net.Conn) {
 		if ready {
 			log.Println("Command ready:", args)
 
-			// If MULTI is called, buffer the commands until EXEC is called
-			if transactionBuffer != nil && args[0] != "EXEC" {
-				transactionBuffer = append(transactionBuffer, args)
-				resp := EncodeRESPSimpleString("QUEUED")
-				if err := r.Write(writer, resp); err != nil {
+			var outputBuf []byte
+			var err error
+
+			switch args[0] {
+			case "MULTI":
+				transactionBuffer = make([]Command, 0)
+				outputBuf = EncodeRESPSimpleString("OK")
+
+			case "EXEC":
+				outputBuf, err = r.HandleEXECCommand(transactionBuffer)
+				transactionBuffer = nil
+				if err != nil {
+					log.Println("Error executing transaction:", err.Error())
 					break
 				}
-				continue
+
+			default:
+				// If within a MULTI transaction, queue the command
+				if transactionBuffer != nil {
+					transactionBuffer = append(transactionBuffer, args)
+					outputBuf = EncodeRESPSimpleString("QUEUED")
+				} else {
+					// Execute normal command
+					outputBuf, err = r.RunCommand(args, c, reader, writer)
+					if err != nil {
+						log.Println("Error running command:", err.Error())
+					}
+				}
 			}
 
-			buf, err := r.RunCommand(args, &transactionBuffer, c, reader, writer)
-			if err != nil {
-				log.Println("Error running command:", err.Error())
-			}
-			if err := r.Write(writer, buf); err != nil {
-				log.Println("Error writing response:", err.Error())
-				break
+			// Write response if outputBuf is set
+			if outputBuf != nil {
+				if err := r.Write(writer, outputBuf); err != nil {
+					log.Println("Error writing response:", err.Error())
+				}
 			}
 		}
 	}

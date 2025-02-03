@@ -114,6 +114,17 @@ func EncodeRESPArray(args []string) []byte {
 	return buf.Bytes()
 }
 
+func EncodeRESPArrayStringEncoded(args [][]byte) []byte {
+	var buf bytes.Buffer
+
+	buf.WriteString("*" + strconv.Itoa(len(args)) + RESPDelimiter)
+	for _, arg := range args {
+		buf.Write(arg)
+	}
+
+	return buf.Bytes()
+}
+
 // EncodeRESPInteger encodes an int into the RESP format.
 func EncodeRESPInteger(i int) []byte {
 	return []byte(":" + strconv.Itoa(i) + RESPDelimiter)
