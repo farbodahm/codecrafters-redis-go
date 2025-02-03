@@ -607,16 +607,23 @@ func (r *Redis) handleConnection(c net.Conn) {
 			var err error
 
 			switch args[0] {
+			// Transaction related commands:
 			case "MULTI":
 				transactionBuffer = make([]Command, 0)
 				outputBuf = EncodeRESPSimpleString("OK")
-
 			case "EXEC":
 				outputBuf, err = r.HandleEXECCommand(transactionBuffer)
 				transactionBuffer = nil
 				if err != nil {
 					log.Println("Error executing transaction:", err.Error())
 					break
+				}
+			case "DISCARD":
+				if transactionBuffer != nil {
+					transactionBuffer = nil
+					outputBuf = EncodeRESPSimpleString("OK")
+				} else {
+					outputBuf = EncodeRESPError("ERR DISCARD without MULTI")
 				}
 
 			default:
