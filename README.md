@@ -1,33 +1,43 @@
 [![progress-banner](https://backend.codecrafters.io/progress/redis/ecc5ac1f-3828-4f3a-9eac-4a6707d87a5d)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
 
-This is a starting point for Go solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+My approach to the ['Build Your Own Redis'](https://app.codecrafters.io/courses/redis/) challenge.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+## Features  
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+- **Basic Commands**: 
+  - `GET`
+  - `SET` (with TTL)
+  - `PING`
+  - `ECHO`  
+- **Concurrency**: Supports multiple concurrent clients  
+- **Persistence**: Loads RDB files and serves the content
+- **Replication**:  
+  - Performs replication handshake  
+  - Propagates commands to replicas  
+  - Supports the `WAIT` command  
+- **Streams**:
+  - Create streams
+  - Support `XREAD` and `XRANGE` commands
+  - Support blocking reads (`XREAD block`)
+  - Support different type of queries (with `+`, `-`, `$`, partially/fully create IDs)
+- **Transactions**:
+  - `INCR` command
+  - `MULTI` and `EXEC` commands
+  - Multiple concurrent transactions with failures within transactions 
 
-# Passing the first stage
+## RUN
 
-The entry point for your Redis implementation is in `app/server.go`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+- **Build**:
+  - `go build -o redis app/*.go`
+- **Basic execution**:
+  - `./redis --port 5678`
+- **Parse RDB**:
+  - `./redis --dir ./redis-data/ --dbfilename dump.rdb --port 5678`
+- **Run as replica**:
+  - `./redis --port 1234 --replicaof "localhost 6379"`
+  
+After the server is running, you can connect to it via any Redis client, Including `redis-cli`;
+Ex: `redis-cli xread block 10000 streams orange 0-110`.
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+**NOTE**: The current version fully supports RESP V2.
 
-That's all!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `go (1.19)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `app/server.go`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
